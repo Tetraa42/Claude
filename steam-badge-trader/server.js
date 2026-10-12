@@ -23,7 +23,9 @@ let env = {};
 const reloadEnv = () => { env = { ...base, ...config.load(DATA_DIR) }; };
 reloadEnv();
 const isDemo = () => base.DEMO === '1' || !env.STEAM_API_KEY;
-const cfg = () => ({ key: env.STEAM_API_KEY, profile: env.STEAM_PROFILE, currency: Number(env.CURRENCY || 3), botProfile: env.BOT_PROFILE || engine.BOT_DEFAULT, extra: [] });
+const cfg = () => ({ key: env.STEAM_API_KEY, profile: env.STEAM_PROFILE, currency: Number(env.CURRENCY || 3), botProfile: env.BOT_PROFILE || engine.BOT_DEFAULT, botOnly: env.BOT_ONLY !== '0' });
+let updater = null;
+const setUpdater = (u) => { updater = u; };
 
 const app = express();
 app.use(express.json());
@@ -36,14 +38,63 @@ let started = false;
 function ensureStarted() {
   if (started) return;
   started = true;
-  if (isDemo()) engine.loadDemo(); else engine.run(cfg());
+  if (isDemo()) return engine.loadDemo();
+  const had = engine.loadSaved(); // affichage immédiat des analyses mémorisées
+  if (!had || !engine.isFresh()) engine.run(cfg());
 }
-app.get('/api/state', (_, res) => { ensureStarted(); res.json(engine.snapshot()); });
+const settingsView = () => ({ creditsBalance: env.CREDITS_BALANCE, creditsPerCard: env.CREDITS_PER_CARD });
+app.get('/api/state', (_, res) => {
+  ensureStarted();
+  res.json({ ...engine.snapshot(settingsView()), theme: env.THEME || 'nuit', seenSetup: env.SEEN_SETUP === '1', version: updater ? updater.status().version : null,
+    update: updater ? updater.status() : null, leaderboard: { url: !!env.LEADERBOARD_URL, joined: env.LB_JOINED === '1' } });
+});
 app.post('/api/refresh', (_, res) => {
   started = true;
   if (isDemo()) engine.loadDemo(); else engine.run(cfg()); // les sets déjà analysés sont relus depuis le cache
   res.json({ ok: true });
 });
+app.post('/api/update/check', async (_, res) => {
+  if (!updater) return res.status(400).json({ error: 'Les mises à jour automatiques ne fonctionnent que dans le logiciel installé (pas en mode développeur).' });
+  try { await updater.check(); res.json(updater.status()); } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/update/install', (_, res) => { if (!updater) return res.status(400).json({ error: 'Indisponible' }); res.json({ ok: true }); setTimeout(() => updater.install(), 400); });
+
+// ---- boosters ----
+app.post('/api/boosters/open', async (req, res) => {
+  try {
+    const { assetid, appid } = req.body;
+    if (isDemo()) return res.json({ cards: ['Héros', 'Mage', 'Dragon'].map((n, i) => ({ name: n, img: `/art/${appid}/${i}.svg`, foil: false })), left: 0 });
+    const cards = await trader.openBooster(Number(appid), assetid);
+    const i = S.boosters.findIndex((b) => String(b.assetid) === String(assetid));
+    if (i >= 0) S.boosters.splice(i, 1);
+    engine.saveState();
+    res.json({ cards });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ---- classements ----
+app.post('/api/rank/scan', (_, res) => { engine.scanRank(cfg()); res.json({ ok: true }); });
+const lbUrl = () => String(env.LEADERBOARD_URL || '').replace(/\/+$/, '');
+let globalCache = { t: 0, list: [] };
+app.get('/api/rank/global', async (_, res) => {
+  try {
+    if (isDemo()) return res.json({ list: ['Zed', 'Mia', 'Kai', 'Lou', 'Noa'].map((n, i) => ({ name: n, avatar: '/art/avatar.svg', level: 80 - i * 9, badgeCount: 400 - i * 50, rarity: 900 - i * 120, steamid: 'g' + i })), demo: true });
+    if (!lbUrl()) return res.json({ list: [], missing: true });
+    if (Date.now() - globalCache.t > 30e3) globalCache = { t: Date.now(), list: (await (await fetch(lbUrl() + '/top?limit=100')).json()).list || [] };
+    res.json({ list: globalCache.list });
+  } catch (e) { res.status(400).json({ error: 'Serveur de classement injoignable : ' + e.message }); }
+});
+app.post('/api/rank/join', async (_, res) => {
+  try {
+    if (isDemo()) return res.json({ ok: true });
+    if (!lbUrl()) throw new Error('Renseigne l\'adresse du serveur de classement dans les Réglages.');
+    const r = await fetch(lbUrl() + '/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ steamid: S.profile.steamid }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Refusé par le serveur');
+    config.save(DATA_DIR, { LB_JOINED: '1' }); reloadEnv(); globalCache.t = 0;
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
 app.post('/api/bot/refresh', (_, res) => { engine.refreshBot(cfg()); res.json({ ok: true }); });
 app.post('/api/friends/scan', (_, res) => { engine.scanFriends(cfg()); res.json({ ok: true }); });
 
@@ -95,15 +146,21 @@ app.post('/api/trade/send', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-const PUBLIC_KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL'];
+const PUBLIC_KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL', 'THEME', 'BOT_ONLY', 'CREDITS_BALANCE', 'CREDITS_PER_CARD', 'LEADERBOARD_URL'];
 app.get('/api/settings', (_, res) => {
   const out = {};
   for (const k of PUBLIC_KEYS) out[k] = env[k] || '';
   for (const k of config.SECRET) out[k + '_SET'] = !!env[k];
   res.json(out);
 });
+const RESCAN = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'BOT_PROFILE', 'BOT_ONLY'];
 app.post('/api/settings', (req, res) => {
-  try { config.save(DATA_DIR, req.body || {}); reloadEnv(); started = false; Object.assign(S, { profile: null, sets: [], completed: [], error: null }); res.json({ ok: true }); }
+  try {
+    const before = RESCAN.map((k) => env[k] || '').join('|');
+    config.save(DATA_DIR, req.body || {}); reloadEnv();
+    if (RESCAN.map((k) => env[k] || '').join('|') !== before) { started = false; Object.assign(S, { profile: null, sets: [], completed: [], error: null }); try { fs.unlinkSync(path.join(DATA_DIR, 'state.json')); } catch {} } // seuls les réglages d'analyse relancent tout
+    res.json({ ok: true });
+  }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -113,5 +170,5 @@ function start(port) {
     srv.on('error', reject);
   });
 }
-module.exports = { start };
+module.exports = { start, setUpdater };
 if (require.main === module) start(Number(env.PORT || 3000)).then((p) => console.log(`Steam Badge Trader → http://localhost:${p} ${isDemo() ? '(MODE DÉMO)' : ''}`));

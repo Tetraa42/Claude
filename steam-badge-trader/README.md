@@ -10,6 +10,13 @@ Télécharge `Steam-Badge-Trader-Setup-x.x.x.exe` depuis l'onglet **Releases** d
 - Filtres : presque à 100 %, prêts à crafter, nouveaux badges, badges en cours, doublons, < 0,50 €, chez le bot, chez des amis, badges terminés.
 - 🤖 Bot CardExchange : son inventaire est comparé à tes cartes manquantes. 👥 Amis : « Scanner mes amis » (liste d'amis publique requise).
 
+## Mise à jour
+Réglages → **⬇ Mettre à jour le logiciel** : l'app cherche la dernière release GitHub, la télécharge, puis redémarre dessus. Tes réglages et les analyses mémorisées (dossier de données de l'app) sont conservés.
+
+## Classement
+- Entre amis : niveau, nombre de badges, rareté (lit les badges publics de tes amis).
+- Entre utilisateurs de l'app : nécessite un serveur (`leaderboard-server/`, voir son README) dont l'adresse se renseigne dans les Réglages.
+
 ## Lancer depuis le code
 ```bash
 cd steam-badge-trader

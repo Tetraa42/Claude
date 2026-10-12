@@ -15,12 +15,16 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
       - run: npm ci
+      - run: npm version 1.0.${{ github.run_number }} --no-git-tag-version --allow-same-version
       - run: npm run dist
       - uses: actions/upload-artifact@v4
         with: { name: Steam-Badge-Trader-Setup, path: steam-badge-trader/dist/*.exe }
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: installer-${{ github.run_number }}
+          tag_name: v1.0.${{ github.run_number }}
           name: Steam Badge Trader (installeur Windows) #${{ github.run_number }}
-          files: steam-badge-trader/dist/*.exe
+          files: |
+            steam-badge-trader/dist/*.exe
+            steam-badge-trader/dist/*.blockmap
+            steam-badge-trader/dist/latest.yml
           prerelease: true

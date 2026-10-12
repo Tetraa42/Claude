@@ -1,50 +1,84 @@
 <!doctype html>
-<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="fr" data-theme="nuit"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Steam Badge Trader</title><link rel="stylesheet" href="style.css"></head>
 <body>
 <header class="hero">
   <div class="who"><img id="avatar" alt=""><div><h1 id="name">Chargement…</h1><div class="sub" id="sub"></div></div></div>
   <div class="level"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="track"/><circle id="ring" cx="60" cy="60" r="52" class="ring"/></svg><div class="lv"><small>NIVEAU</small><b id="lvl">–</b></div></div>
-  <div class="goal"><div class="kpi"><span id="proj">–</span><small>niveau atteignable</small></div><div class="kpi"><span id="gain">–</span><small>XP à gagner</small></div><div class="kpi"><span id="tot">–</span><small>coût total</small></div></div>
+  <div class="goal"><div class="kpi"><span id="proj">–</span><small>niveau atteignable</small></div><div class="kpi"><span id="gain">–</span><small>XP à gagner</small></div><div class="kpi"><span id="tot">–</span><small>coût total</small></div><div class="kpi" id="kcred" hidden><span id="cred">–</span><small>crédits SCE</small></div></div>
 </header>
 <main>
-  <div class="status" id="status" hidden>
-    <div class="spin" id="spin"></div><div class="st"><b id="stt"></b><div class="meter"><i id="stbar" style="width:0"></i></div></div>
-  </div>
+  <div class="status" id="status" hidden><div class="spin"></div><div class="st"><b id="stt"></b><div class="meter"><i id="stbar" style="width:0"></i></div><small id="sts"></small></div></div>
   <div id="err" class="errbox" hidden></div>
-  <div class="sources">
-    <div class="src"><b>🤖 Bot CardExchange</b><span id="botst">…</span><button id="botref" class="ghost sm">↻</button></div>
-    <div class="src"><b>👥 Amis</b><span id="frst">non analysés</span><button id="frscan" class="ghost sm">Scanner mes amis</button></div>
-  </div>
-  <div class="bar"><h2 id="h2">Sets à compléter</h2>
-    <div class="tools"><input id="q" placeholder="Rechercher un jeu…"><select id="sort"><option value="cost">Trier : moins cher</option><option value="missing">Trier : moins de cartes manquantes</option><option value="pct">Trier : % complété</option><option value="name">Trier : nom</option></select>
-    <button id="refresh" class="ghost">↻ Actualiser</button><button id="cfg" class="ghost">⚙ Réglages</button><a class="ghost" href="https://www.steamcardexchange.net/" target="_blank" rel="noopener">SteamCardExchange ↗</a></div></div>
-  <div class="chips" id="chips"></div>
-  <section id="grid" class="grid"></section>
+  <nav class="views" id="views"><button data-v="sets" class="on">🃏 Sets</button><button data-v="boosters">📦 Boosters <i id="nboost"></i></button><button data-v="rank">🏆 Classement</button><span class="grow"></span><button id="upd" class="pillbtn" hidden>⬇ Mise à jour disponible</button></nav>
+
+  <section id="v-sets">
+    <div class="sources">
+      <div class="src"><b>🤖 Bot CardExchange</b><span id="botst">…</span><button id="botref" class="ghost sm" title="Recharger l'inventaire du bot">↻</button></div>
+      <div class="src"><b>👥 Amis</b><span id="frst">non analysés</span><button id="frscan" class="ghost sm">Scanner mes amis</button></div>
+    </div>
+    <div class="bar"><h2 id="h2">Sets à compléter</h2>
+      <div class="tools"><input id="q" placeholder="Rechercher un jeu…"><select id="sort"><option value="cost">Trier : moins cher</option><option value="missing">Trier : moins de cartes manquantes</option><option value="pct">Trier : % complété</option><option value="name">Trier : nom</option></select>
+      <button id="refresh" class="ghost">↻ Actualiser</button><a class="ghost" href="https://www.steamcardexchange.net/" target="_blank" rel="noopener">SteamCardExchange ↗</a></div></div>
+    <div class="chips" id="chips"></div>
+    <div class="meta" id="meta"></div>
+    <section id="grid" class="grid"></section>
+  </section>
+
+  <section id="v-boosters" hidden>
+    <div class="bar"><h2>Boosters <small>packs de 3 cartes de tes jeux</small></h2></div>
+    <p class="mut">Ouvrir un booster est <b>définitif</b> : il disparaît et tu reçois 3 cartes au hasard dans ton inventaire.</p>
+    <section id="bgrid" class="grid"></section>
+  </section>
+
+  <section id="v-rank" hidden>
+    <div class="bar"><h2>Classement</h2><div class="tools">
+      <div class="tabs inline" id="rtabs"><button data-r="friends" class="on">👥 Entre amis</button><button data-r="global">🌍 Utilisateurs de l'app</button></div>
+      <select id="rmetric"><option value="level">Niveau</option><option value="badgeCount">Nombre de badges</option><option value="rarity">Rareté des badges</option><option value="xp">XP</option></select></div></div>
+    <div id="rbody"></div>
+    <p class="mut small">Rareté = somme de points par badge, plus le badge est détenu par peu de joueurs, plus il rapporte (≈ 7 − log₁₀ du nombre de détenteurs). Badges rares = détenus par moins de 10 000 joueurs.</p>
+  </section>
 </main>
+
 <dialog id="dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form>
   <h3 id="dt"></h3>
   <div class="tabs" id="tabs"><button data-s="bot" class="on">🤖 Bot</button><button data-s="friend">👥 Ami</button><button data-s="url">🔗 Lien</button></div>
   <div id="srcbox"></div>
   <div id="pv" class="pv" hidden><div><h4>Tu reçois</h4><div id="askl" class="mini"></div></div><div class="arrow">⇄</div><div><h4>Tu donnes</h4><div id="givel" class="mini"></div></div></div>
   <p id="note" class="note"></p>
-  <div id="guard" hidden><input id="gcode" placeholder="Code Steam Guard"><button id="gok" class="ghost">Valider</button></div>
   <button id="go" class="go" disabled>🚀 Lancer l'échange</button>
 </dialog>
+
+<dialog id="gdlg"><h3>Code Steam Guard</h3><p class="mut">Entre le code de ton application Steam mobile.</p><input id="gcode" placeholder="Code" autocomplete="off"><button id="gok" class="go">Valider</button></dialog>
+
+<dialog id="bdlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form><h3 id="bt"></h3><div id="bres" class="mini big"></div><p class="mut">Clique sur « Actualiser » pour mettre à jour tes sets.</p></dialog>
+
 <dialog id="sdlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form>
   <h3>⚙ Réglages</h3>
-  <p class="note ok">Étape 1 : colle l'adresse de ton profil. Étape 2 : crée ta clé gratuite.</p>
-  <label class="lab">Adresse de ton profil Steam<input id="s_profile" placeholder="https://steamcommunity.com/id/quarantdeux/"></label>
-  <label class="lab">Clé API Steam <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">→ la créer ici (nom de domaine : localhost)</a><input id="s_key" placeholder="32 caractères"></label>
-  <label class="lab">Monnaie<select id="s_cur"><option value="3">Euro (€)</option><option value="1">Dollar ($)</option><option value="2">Livre (£)</option></select></label>
-  <details><summary>Bot CardExchange</summary><label class="lab">Profil du bot<input id="s_bot" placeholder="https://steamcommunity.com/id/CardExchange"></label><label class="lab">Lien d'échange du bot (pour lui envoyer des offres)<input id="s_boturl"></label></details>
-  <details><summary>Pour envoyer des échanges (optionnel)</summary>
+  <section class="sec"><h4>🔄 Logiciel</h4>
+    <div class="updrow"><span id="ver" class="mut"></span><button id="updbtn" class="ghost">⬇ Mettre à jour le logiciel</button></div><p id="updst" class="note"></p></section>
+  <section class="sec"><h4>🎨 Thème</h4><div class="themes" id="themes"></div></section>
+  <section class="sec"><h4>Compte Steam</h4>
+    <label class="lab">Adresse de ton profil Steam<input id="s_profile" placeholder="https://steamcommunity.com/id/quarantdeux/"></label>
+    <label class="lab">Clé API Steam <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">→ la créer (domaine : localhost)</a><input id="s_key" placeholder="32 caractères"></label>
+    <label class="lab">Monnaie<select id="s_cur"><option value="3">Euro (€)</option><option value="1">Dollar ($)</option><option value="2">Livre (£)</option></select></label></section>
+  <section class="sec"><h4>🤖 Bot CardExchange</h4>
+    <label class="check"><input type="checkbox" id="s_botonly"> Scanner seulement les jeux que possède le bot (beaucoup plus rapide)</label>
+    <label class="lab">Profil du bot<input id="s_bot" placeholder="https://steamcommunity.com/id/CardExchange"></label>
+    <label class="lab">Lien d'échange du bot (pour lui envoyer des offres)<input id="s_boturl"></label></section>
+  <section class="sec"><h4>💳 Crédits SteamCardExchange</h4>
+    <p class="mut small">Je ne peux pas lire le site automatiquement : renseigne ici tes valeurs, elles s'affichent sur les sets.</p>
+    <label class="lab">Mes crédits<input id="s_cbal" inputmode="decimal" placeholder="ex. 12.5"></label>
+    <label class="lab">Coût d'une carte en crédits<input id="s_cpc" inputmode="decimal" placeholder="ex. 1"></label></section>
+  <section class="sec"><h4>🌍 Classement des utilisateurs</h4>
+    <label class="lab">Adresse du serveur de classement<input id="s_lb" placeholder="https://… (voir leaderboard-server/README.md)"></label></section>
+  <details class="sec"><summary>Échanges et boosters : connexion Steam (optionnel)</summary>
     <label class="lab">Nom de compte Steam<input id="s_acc"></label>
     <label class="lab">Mot de passe <input id="s_pwd" type="password" autocomplete="off"></label>
     <label class="lab">shared_secret (facultatif)<input id="s_shared" type="password" autocomplete="off"></label>
     <label class="lab">identity_secret (facultatif)<input id="s_ident" type="password" autocomplete="off"></label>
     <small class="mut">Stocké chiffré sur cet ordinateur uniquement. Laisse vide pour garder l'ancienne valeur.</small></details>
-  <button id="ssave" class="go">Enregistrer et analyser</button>
+  <button id="ssave" class="go">Enregistrer</button>
 </dialog>
 <div id="toast"></div>
 <script src="app.js"></script></body></html>

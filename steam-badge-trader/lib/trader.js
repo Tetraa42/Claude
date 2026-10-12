@@ -58,4 +58,11 @@ function sendOffer(env, { tradeUrl, give, ask, message }) {
     });
   });
 }
-module.exports = { state, login, submitGuard, sendOffer };
+
+function openBooster(appid, assetid) {
+  return new Promise((resolve, reject) => {
+    if (!state.ready) return reject(new Error('Pas connecté à Steam'));
+    state.community.openBoosterPack(appid, String(assetid), (err, items) => (err ? reject(err) : resolve(items.map((i) => ({ name: i.name, img: i.image, foil: !!i.foil })))));
+  });
+}
+module.exports = { state, login, submitGuard, sendOffer, openBooster };

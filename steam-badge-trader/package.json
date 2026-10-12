@@ -11,6 +11,7 @@
   },
   "license": "MIT",
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "express": "^5.1.0",
     "steam-totp": "^2.1.2",
     "steam-tradeoffer-manager": "^2.10.8",
@@ -54,7 +55,15 @@
       "shortcutName": "Steam Badge Trader",
       "runAfterFinish": true,
       "language": "1036"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Tetraa42",
+        "repo": "Claude",
+        "releaseType": "prerelease"
+      }
+    ]
   },
   "devDependencies": {
     "electron": "^33.4.11",

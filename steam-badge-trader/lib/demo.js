@@ -55,11 +55,21 @@ function demoState() {
     sets, myCards, currency: 3,
     profile: { steamid: '76561198000000000', name: 'quarantdeux (démo)', avatar: '/art/avatar.svg', url: 'https://steamcommunity.com/id/quarantdeux/', level: L.level, xp, intoLevel: L.intoLevel, needed: L.needed, badges: [] },
     completed: [['Ocean Keepers', 120], ['Rogue Station', 260], ['Tiny Tanks', 20]].map(([name, hue], i) => ({ appid: 800000 + i, name, level: 5, banner: `/art/banner/${800000 + i}.svg` })),
-    bot: { status: 'ready', error: null, id: 'bot', name: 'CardExchange (démo)', avatar: null, map: botMap, count: 18420 },
+    bot: { status: 'ready', error: null, id: 'bot', name: 'CardExchange (démo)', avatar: null, map: botMap, apps: new Set(GAMES.map((g) => g.appid)), count: 18420, t: Date.now() },
     friends: { status: 'idle', error: null, done: 0, total: FRIENDS.length, list: FRIENDS.map((n, i) => ({ steamid: '7656119800' + i, name: n, avatar: '/art/avatar.svg' })), inv: new Map() },
-    phase: '', done: 0, total: 0,
+    boosters: GAMES.slice(0, 3).flatMap((g, i) => Array.from({ length: i + 1 }, (_, k) => ({ assetid: `bo${g.appid}_${k}`, appid: g.appid, name: g.name + ' Booster Pack', game: g.name, img: cardUrl(g.appid, 4 + i), tradable: true }))),
+    rank: { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0 },
+    updatedAt: Date.now(), phase: '', done: 0, total: 0,
   };
 }
+
+function demoRank(S) {
+  const rows = [['Lucas', 41, 212, 9, 410.5], ['Emma', 33, 160, 4, 295.2], ['Hugo', 58, 340, 22, 780.9], ['Chloé', 27, 98, 2, 150.4], ['Nathan', 46, 255, 12, 520.1], ['Léa', 19, 61, 1, 88.8]];
+  const list = rows.map(([name, level, badgeCount, rareCount, rarity], i) => ({ steamid: '7656119800' + i, name, avatar: '/art/avatar.svg', me: false, level, xp: level * 150, badgeCount, rareCount, rarity }));
+  list.push({ steamid: S.profile.steamid, name: S.profile.name, avatar: S.profile.avatar, me: true, level: S.profile.level, xp: S.profile.xp, badgeCount: 118, rareCount: 5, rarity: 232.7 });
+  return list;
+}
+
 
 function fillFriends(F, S) {
   const missing = S.sets.flatMap((s) => s.cards.filter((c) => !c.owned));
@@ -74,4 +84,4 @@ function fillFriends(F, S) {
 function svgAvatar() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#66c0f4"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="120" height="120" fill="url(#a)"/><circle cx="60" cy="46" r="22" fill="#fff" opacity=".9"/><path d="M16 112c4-30 26-40 44-40s40 10 44 40z" fill="#fff" opacity=".9"/></svg>`;
 }
-module.exports = { demoState, fillFriends, svgCard, svgAvatar, svgBanner };
+module.exports = { demoState, demoRank, fillFriends, svgCard, svgAvatar, svgBanner };
