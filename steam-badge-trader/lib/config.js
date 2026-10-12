@@ -2,7 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const SECRET = ['STEAM_PASSWORD', 'STEAM_SHARED_SECRET', 'STEAM_IDENTITY_SECRET'];
-const KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', ...SECRET];
+const KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL', ...SECRET];
 
 let safe = null;
 try { const { safeStorage } = require('electron'); if (safeStorage && safeStorage.isEncryptionAvailable()) safe = safeStorage; } catch {}

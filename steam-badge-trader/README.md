@@ -5,6 +5,11 @@ Application locale (Node.js + navigateur) pour monter de niveau Steam : elle lis
 ## Installer sur Windows (le plus simple)
 Télécharge `Steam-Badge-Trader-Setup-x.x.x.exe` depuis l'onglet **Releases** du dépôt GitHub, double-clique, installe : un raccourci est créé sur le **Bureau** et dans le **menu Démarrer**. Au premier lancement, la fenêtre **Réglages** s'ouvre : colle ton profil + ta clé API Steam.
 
+## Fonctions
+- Analyse en tâche de fond : les sets apparaissent au fur et à mesure, Steam qui limite le débit (429) = l'app attend et reprend toute seule, le cache (12 h) évite de tout refaire à chaque « Actualiser ».
+- Filtres : presque à 100 %, prêts à crafter, nouveaux badges, badges en cours, doublons, < 0,50 €, chez le bot, chez des amis, badges terminés.
+- 🤖 Bot CardExchange : son inventaire est comparé à tes cartes manquantes. 👥 Amis : « Scanner mes amis » (liste d'amis publique requise).
+
 ## Lancer depuis le code
 ```bash
 cd steam-badge-trader

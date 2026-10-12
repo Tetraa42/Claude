@@ -1,90 +1,79 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const express = require('express');
 
-// mini lecteur .env (sans dépendance)
+// lecteur .env minimal (utile en mode développeur)
 const envFile = path.join(__dirname, '.env');
 if (fs.existsSync(envFile)) for (const l of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
   const m = l.match(/^\s*([A-Z_]+)\s*=\s*([^#]*?)\s*(#.*)?$/);
   if (m && !(m[1] in process.env)) process.env[m[1]] = m[2];
 }
-const os = require('os');
 const DATA_DIR = process.env.BADGE_DATA_DIR || path.join(os.homedir(), '.steam-badge-trader');
 process.env.BADGE_DATA_DIR = DATA_DIR;
 const config = require('./lib/config');
+const steam = require('./lib/steam');
+const demo = require('./lib/demo');
+const trader = require('./lib/trader');
+const engine = require('./lib/engine');
+const { S } = engine;
+
 const base = { ...process.env };
 let env = {};
 const reloadEnv = () => { env = { ...base, ...config.load(DATA_DIR) }; };
 reloadEnv();
 const isDemo = () => base.DEMO === '1' || !env.STEAM_API_KEY;
-const currencyNow = () => Number(env.CURRENCY || 3);
-const steam = require('./lib/steam');
-const demo = require('./lib/demo');
-const trader = require('./lib/trader');
-const { totalXpForLevel, levelFromXp } = require('./lib/levels');
+const cfg = () => ({ key: env.STEAM_API_KEY, profile: env.STEAM_PROFILE, currency: Number(env.CURRENCY || 3), botProfile: env.BOT_PROFILE || engine.BOT_DEFAULT, extra: [] });
 
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
-
 app.get('/art/avatar.svg', (_, res) => res.type('svg').send(demo.svgAvatar()));
+app.get('/art/banner/:appid.svg', (req, res) => res.type('svg').send(demo.svgBanner(req.params.appid)));
 app.get('/art/:appid/:i.svg', (req, res) => res.type('svg').set('Cache-Control', 'public,max-age=86400').send(demo.svgCard(req.params.appid, Number(req.params.i))));
 
-let cache = null, progress = { done: 0, total: 0, busy: false };
-
-app.get('/api/overview', async (req, res) => {
-  try {
-    if (isDemo()) return res.json(withProjection(demo.demoOverview()));
-    if (req.query.refresh || !cache) {
-      progress = { done: 0, total: 0, busy: true };
-      const id = await steam.resolveSteamId(env.STEAM_PROFILE, env.STEAM_API_KEY);
-      const extra = String(req.query.apps || '').split(',').map(Number).filter(Boolean);
-      const o = await steam.buildOverview({ key: env.STEAM_API_KEY, steamid: id, currency: currencyNow(), extraApps: extra,
-        onProgress: (d, t) => (progress = { done: d, total: t, busy: true }) });
-      cache = o;
-      progress.busy = false;
-    }
-    const { myCards, ...rest } = cache;
-    res.json(withProjection(rest));
-  } catch (e) { progress.busy = false; res.status(500).json({ error: e.message }); }
-});
-app.get('/api/progress', (_, res) => res.json(progress));
-
-// niveau atteignable si on complète tous les sets listés (+100 XP chacun)
-function withProjection(o) {
-  const gain = o.sets.length * 100;
-  const proj = levelFromXp(o.profile.xp + gain).level;
-  const cheap = [];
-  let spent = 0, xp = o.profile.xp;
-  for (const s of o.sets) { spent += s.cost; xp += 100; cheap.push({ appid: s.appid, spent: +spent.toFixed(2), level: levelFromXp(xp).level }); }
-  return { ...o, demo: isDemo(), currency: currencyNow(), projection: { gainXp: gain, level: proj, steps: cheap, nextLevelXp: totalXpForLevel(o.profile.level + 1) - o.profile.xp } };
+let started = false;
+function ensureStarted() {
+  if (started) return;
+  started = true;
+  if (isDemo()) engine.loadDemo(); else engine.run(cfg());
 }
+app.get('/api/state', (_, res) => { ensureStarted(); res.json(engine.snapshot()); });
+app.post('/api/refresh', (_, res) => {
+  started = true;
+  if (isDemo()) engine.loadDemo(); else engine.run(cfg()); // les sets déjà analysés sont relus depuis le cache
+  res.json({ ok: true });
+});
+app.post('/api/bot/refresh', (_, res) => { engine.refreshBot(cfg()); res.json({ ok: true }); });
+app.post('/api/friends/scan', (_, res) => { engine.scanFriends(cfg()); res.json({ ok: true }); });
 
 const parseTrade = (u) => {
   const m = String(u).match(/partner=(\d+)/);
-  if (!m) throw new Error('Lien d\'échange invalide (il doit contenir partner=… & token=…)');
+  if (!m) throw new Error('Lien d\'échange invalide (il doit contenir partner=… et token=…)');
   return (BigInt(m[1]) + 76561197960265728n).toString();
 };
 
-// Prépare l'échange : cartes manquantes que le partenaire possède / doublons que je donne en retour.
+// Prépare l'échange : cartes manquantes que la source possède / cartes en trop que je donne en retour.
 app.post('/api/trade/preview', async (req, res) => {
   try {
-    const { appid, tradeUrl } = req.body;
-    const set = (isDemo() ? demo.demoOverview() : cache).sets.find((s) => s.appid === Number(appid));
+    const { appid, source, tradeUrl, friendId } = req.body;
+    const set = S.sets.find((s) => s.appid === Number(appid));
     if (!set) throw new Error('Set inconnu');
-    const missing = set.cards.filter((c) => !c.owned);
-    let partner = [];
-    if (isDemo()) partner = missing.slice(0, Math.max(1, missing.length - 1)).map((c, i) => ({ ...c, assetid: 'p' + i }));
-    else {
-      const theirs = await steam.getCards(parseTrade(tradeUrl));
-      partner = missing.flatMap((c) => theirs.filter((t) => t.hash === c.hash && t.tradable).slice(0, 1).map((t) => ({ ...c, assetid: t.assetid })));
+    let theirs;
+    if (source === 'bot') {
+      if (S.bot.status !== 'ready') throw new Error('Inventaire du bot pas encore chargé : ' + (S.bot.error || 'patiente quelques secondes'));
+      theirs = S.bot.map;
+    } else if (source === 'friend') {
+      theirs = S.friends.inv.get(friendId);
+      if (!theirs) throw new Error('Ami inconnu : lance d\'abord « Scanner mes amis »');
+    } else {
+      theirs = engine.groupBy((await steam.getCards(parseTrade(tradeUrl))).filter((c) => c.tradable), (c) => c.hash);
     }
-    const mySpare = [];
-    for (const s of (isDemo() ? demo.demoOverview() : cache).sets)
-      for (const c of s.cards) for (const id of c.assetids.slice(1)) mySpare.push({ name: c.name, img: c.img, assetid: id, game: s.name, price: c.price });
-    const ask = partner.map((c) => ({ name: c.name, img: c.img, assetid: c.assetid, price: c.price }));
-    res.json({ set: set.name, ask, give: mySpare.slice(0, ask.length), notFound: missing.length - ask.length, spare: mySpare.length });
-  } catch (e) { res.status(400).json({ error: e.message }); }
+    const missing = set.cards.filter((c) => !c.owned);
+    const ask = missing.flatMap((c) => (theirs.get(c.hash) || []).slice(0, 1).map((t) => ({ name: c.name, img: c.img, assetid: t.assetid, price: c.price })));
+    const give = engine.spareCards().slice(0, ask.length).map((c) => ({ name: c.name, img: c.img, assetid: c.assetid }));
+    res.json({ set: set.name, ask, give, notFound: missing.length - ask.length, spare: engine.spareCards().length });
+  } catch (e) { res.status(400).json({ error: e.code === 'PRIVATE' ? 'Inventaire privé' : e.message }); }
 });
 
 app.get('/api/trade/status', (_, res) => res.json({ ready: trader.state.ready, needGuard: trader.state.needGuard, error: trader.state.error, demo: isDemo() }));
@@ -97,14 +86,16 @@ app.post('/api/trade/login', async (req, res) => {
 });
 app.post('/api/trade/send', async (req, res) => {
   try {
-    const { tradeUrl, give, ask } = req.body;
+    const { source, tradeUrl, friendId, give, ask } = req.body;
     if (isDemo()) return res.json({ id: '000000', status: 'sent', note: 'Mode démo : aucune offre réelle envoyée.' });
-    if (!ask.length) throw new Error('Rien à demander : le partenaire n\'a aucune carte manquante.');
-    res.json(await trader.sendOffer(env, { tradeUrl, give, ask }));
+    if (!ask.length) throw new Error('Rien à demander : aucune carte manquante chez cette source.');
+    const partner = source === 'friend' ? friendId : source === 'bot' ? (tradeUrl || env.BOT_TRADE_URL) : tradeUrl;
+    if (!partner) throw new Error('Il manque le lien d\'échange du bot (Réglages) ou du partenaire.');
+    res.json(await trader.sendOffer(env, { tradeUrl: partner, give, ask }));
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-const PUBLIC_KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT'];
+const PUBLIC_KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL'];
 app.get('/api/settings', (_, res) => {
   const out = {};
   for (const k of PUBLIC_KEYS) out[k] = env[k] || '';
@@ -112,7 +103,7 @@ app.get('/api/settings', (_, res) => {
   res.json(out);
 });
 app.post('/api/settings', (req, res) => {
-  try { config.save(DATA_DIR, req.body || {}); reloadEnv(); cache = null; res.json({ ok: true }); }
+  try { config.save(DATA_DIR, req.body || {}); reloadEnv(); started = false; Object.assign(S, { profile: null, sets: [], completed: [], error: null }); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 

@@ -26,26 +26,52 @@ function svgCard(appid, i, w = 192, h = 192) {
 <text x="96" y="171" text-anchor="middle" font-family="Segoe UI,Arial" font-weight="700" font-size="15" fill="#fff">${n}</text></svg>`;
 }
 
-function demoOverview() {
-  const sets = GAMES.map((g, i) => {
+const FRIENDS = ['Lucas', 'Emma', 'Hugo', 'Chloé', 'Nathan', 'Léa'];
+function svgBanner(appid) {
+  const g = GAMES.find((x) => x.appid === Number(appid)) || { name: 'Jeu', hue: 200 };
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 215"><defs><linearGradient id="b" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${g.hue} 70% 32%)"/><stop offset="1" stop-color="hsl(${(g.hue + 70) % 360} 80% 14%)"/></linearGradient></defs><rect width="460" height="215" fill="url(#b)"/><g opacity=".25" fill="#fff"><circle cx="380" cy="50" r="90"/><circle cx="60" cy="190" r="70"/></g><text x="24" y="120" font-family="Segoe UI,Arial" font-weight="800" font-size="34" fill="#fff">${g.name}</text></svg>`;
+}
+
+function demoState() {
+  const sets = [], myCards = [], botMap = new Map();
+  GAMES.forEach((g, i) => {
     const total = 5 + (i % 3);
     const cards = Array.from({ length: total }, (_, k) => {
       const price = +(0.03 + ((i * 7 + k * 5) % 11) * 0.02).toFixed(2);
       const owned = (k + i) % 3 === 0 ? 0 : (k * i) % 4 === 0 ? 2 : 1;
-      return { hash: `${g.appid}-${CARD_NAMES[k]}`, name: CARD_NAMES[k], price, priceText: price.toFixed(2).replace('.', ',') + '€', listings: 120 + k * 9,
-        img: cardUrl(g.appid, k), owned, assetids: Array.from({ length: owned }, (_, j) => `d${g.appid}_${k}_${j}`) };
+      const hash = `${g.appid}-${CARD_NAMES[k]}`;
+      const assetids = Array.from({ length: owned }, (_, j) => `d${g.appid}_${k}_${j}`);
+      assetids.forEach((id) => myCards.push({ assetid: id, hash, name: CARD_NAMES[k], appid: g.appid, img: cardUrl(g.appid, k), tradable: true }));
+      if (!owned && (k + i) % 2 === 0) botMap.set(hash, [{ assetid: 'b' + hash }]);
+      return { hash, name: CARD_NAMES[k], price, priceText: price.toFixed(2).replace('.', ',') + '€', listings: 120 + k * 9, img: cardUrl(g.appid, k), owned, assetids };
     });
     const missing = cards.filter((c) => !c.owned);
-    return { appid: g.appid, name: g.name, badgeLevel: i % 4 === 3 ? 1 : 0, total, ownedUnique: total - missing.length,
-      cost: +missing.reduce((t, c) => t + c.price, 0).toFixed(2), dupes: cards.reduce((t, c) => t + Math.max(0, c.owned - 1), 0),
-      costPerXp: 0, cards, link: `https://www.steamcardexchange.net/index.php?gamepage-appid-${g.appid}` };
-  }).sort((a, b) => a.cost - b.cost);
+    sets.push({ appid: g.appid, name: g.name, badgeLevel: i % 4 === 3 ? 1 : 0, total, ownedUnique: total - missing.length, missingCount: missing.length,
+      cost: +missing.reduce((t, c) => t + c.price, 0).toFixed(2), dupes: cards.reduce((t, c) => t + Math.max(0, c.owned - 1), 0), cards,
+      banner: `/art/banner/${g.appid}.svg`, link: `https://www.steamcardexchange.net/index.php?gamepage-appid-${g.appid}` });
+  });
   const xp = 4310, L = levelFromXp(xp);
-  return { demo: true, profile: { steamid: '76561198000000000', name: 'quarantdeux (démo)', avatar: '/art/avatar.svg', url: 'https://steamcommunity.com/id/quarantdeux/',
-    level: L.level, xp, intoLevel: L.intoLevel, needed: L.needed, badges: [] }, sets, totalCards: 41 };
+  return {
+    sets, myCards, currency: 3,
+    profile: { steamid: '76561198000000000', name: 'quarantdeux (démo)', avatar: '/art/avatar.svg', url: 'https://steamcommunity.com/id/quarantdeux/', level: L.level, xp, intoLevel: L.intoLevel, needed: L.needed, badges: [] },
+    completed: [['Ocean Keepers', 120], ['Rogue Station', 260], ['Tiny Tanks', 20]].map(([name, hue], i) => ({ appid: 800000 + i, name, level: 5, banner: `/art/banner/${800000 + i}.svg` })),
+    bot: { status: 'ready', error: null, id: 'bot', name: 'CardExchange (démo)', avatar: null, map: botMap, count: 18420 },
+    friends: { status: 'idle', error: null, done: 0, total: FRIENDS.length, list: FRIENDS.map((n, i) => ({ steamid: '7656119800' + i, name: n, avatar: '/art/avatar.svg' })), inv: new Map() },
+    phase: '', done: 0, total: 0,
+  };
+}
+
+function fillFriends(F, S) {
+  const missing = S.sets.flatMap((s) => s.cards.filter((c) => !c.owned));
+  F.list.forEach((f, i) => {
+    const m = new Map();
+    missing.forEach((c, k) => { if ((k + i) % 3 === 0) m.set(c.hash, [{ assetid: `f${i}_${k}`, tradable: true }]); });
+    F.inv.set(f.steamid, m);
+  });
+  F.done = F.total; F.status = 'ready';
 }
 
 function svgAvatar() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#66c0f4"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="120" height="120" fill="url(#a)"/><circle cx="60" cy="46" r="22" fill="#fff" opacity=".9"/><path d="M16 112c4-30 26-40 44-40s40 10 44 40z" fill="#fff" opacity=".9"/></svg>`;
 }
-module.exports = { demoOverview, svgCard, svgAvatar };
+module.exports = { demoState, fillFriends, svgCard, svgAvatar, svgBanner };
