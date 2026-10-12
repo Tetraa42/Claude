@@ -67,4 +67,19 @@ $('#gok').onclick = async () => {
 };
 $('#q').oninput = () => data && draw();
 $('#refresh').onclick = () => load(true);
-load();
+async function openSettings() {
+  const c = await api('/api/settings');
+  $('#s_profile').value = c.STEAM_PROFILE; $('#s_key').value = c.STEAM_API_KEY; $('#s_cur').value = c.CURRENCY || '3'; $('#s_acc').value = c.STEAM_ACCOUNT;
+  for (const [id, k] of [['s_pwd', 'STEAM_PASSWORD'], ['s_shared', 'STEAM_SHARED_SECRET'], ['s_ident', 'STEAM_IDENTITY_SECRET']]) { $('#' + id).value = ''; $('#' + id).placeholder = c[k + '_SET'] ? '••••••• (enregistré)' : ''; }
+  $('#sdlg').showModal();
+}
+$('#cfg').onclick = openSettings;
+$('#ssave').onclick = async (e) => {
+  e.preventDefault();
+  try {
+    await api('/api/settings', { STEAM_PROFILE: $('#s_profile').value, STEAM_API_KEY: $('#s_key').value, CURRENCY: $('#s_cur').value, STEAM_ACCOUNT: $('#s_acc').value,
+      STEAM_PASSWORD: $('#s_pwd').value, STEAM_SHARED_SECRET: $('#s_shared').value, STEAM_IDENTITY_SECRET: $('#s_ident').value });
+    $('#sdlg').close(); toast('Réglages enregistrés'); load(true);
+  } catch (e) { toast(e.message, true); }
+};
+load().then(() => { if (data && data.demo) { try { if (!localStorage.seen) { localStorage.seen = 1; openSettings(); } } catch {} } });

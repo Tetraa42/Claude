@@ -9,7 +9,7 @@
 </header>
 <main>
   <div class="bar"><h2>Sets à compléter <small>du moins cher au plus cher</small></h2>
-    <div class="tools"><input id="q" placeholder="Rechercher un jeu…"><button id="refresh" class="ghost">↻ Actualiser</button><a class="ghost" href="https://www.steamcardexchange.net/" target="_blank" rel="noopener">SteamCardExchange ↗</a></div></div>
+    <div class="tools"><input id="q" placeholder="Rechercher un jeu…"><button id="refresh" class="ghost">↻ Actualiser</button><button id="cfg" class="ghost">⚙ Réglages</button><a class="ghost" href="https://www.steamcardexchange.net/" target="_blank" rel="noopener">SteamCardExchange ↗</a></div></div>
   <div id="load" class="load" hidden><div class="spin"></div><span id="loadt">Analyse de ton inventaire…</span></div>
   <div id="err" class="errbox" hidden></div>
   <section id="grid" class="grid"></section>
@@ -22,6 +22,20 @@
   <p id="note" class="note"></p>
   <div id="guard" hidden><input id="gcode" placeholder="Code Steam Guard"><button id="gok" class="ghost">Valider</button></div>
   <button id="go" class="go" disabled>🚀 Lancer l'échange</button>
+</dialog>
+<dialog id="sdlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form>
+  <h3>⚙ Réglages</h3>
+  <p class="note ok">Étape 1 : colle l'adresse de ton profil. Étape 2 : crée ta clé gratuite.</p>
+  <label class="lab">Adresse de ton profil Steam<input id="s_profile" placeholder="https://steamcommunity.com/id/quarantdeux/"></label>
+  <label class="lab">Clé API Steam <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">→ la créer ici (nom de domaine : localhost)</a><input id="s_key" placeholder="32 caractères"></label>
+  <label class="lab">Monnaie<select id="s_cur"><option value="3">Euro (€)</option><option value="1">Dollar ($)</option><option value="2">Livre (£)</option></select></label>
+  <details><summary>Pour envoyer des échanges (optionnel)</summary>
+    <label class="lab">Nom de compte Steam<input id="s_acc"></label>
+    <label class="lab">Mot de passe <input id="s_pwd" type="password" autocomplete="off"></label>
+    <label class="lab">shared_secret (facultatif)<input id="s_shared" type="password" autocomplete="off"></label>
+    <label class="lab">identity_secret (facultatif)<input id="s_ident" type="password" autocomplete="off"></label>
+    <small class="mut">Stocké chiffré sur cet ordinateur uniquement. Laisse vide pour garder l'ancienne valeur.</small></details>
+  <button id="ssave" class="go">Enregistrer et analyser</button>
 </dialog>
 <div id="toast"></div>
 <script src="app.js"></script></body></html>

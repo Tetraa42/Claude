@@ -2,8 +2,13 @@
   "name": "steam-badge-trader",
   "version": "1.0.0",
   "description": "Complète tes badges Steam et monte de niveau : plan des sets les moins chers + bouton d'échange.",
-  "main": "server.js",
-  "scripts": { "start": "node server.js", "demo": "DEMO=1 node server.js" },
+  "main": "main.js",
+  "scripts": {
+    "start": "node server.js",
+    "demo": "DEMO=1 node server.js",
+    "desktop": "electron .",
+    "dist": "electron-builder --win --publish never"
+  },
   "license": "MIT",
   "dependencies": {
     "express": "^5.1.0",
@@ -11,5 +16,48 @@
     "steam-tradeoffer-manager": "^2.10.8",
     "steam-user": "^5.2.3",
     "steamcommunity": "^3.48.6"
+  },
+  "author": "quarantdeux",
+  "build": {
+    "appId": "com.quarantdeux.steambadgetrader",
+    "productName": "Steam Badge Trader",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "server.js",
+      "lib/**",
+      "public/**",
+      "build/icon.png",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Steam-Badge-Trader-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Steam Badge Trader",
+      "runAfterFinish": true,
+      "language": "1036"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
   }
 }

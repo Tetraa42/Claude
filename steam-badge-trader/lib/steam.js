@@ -3,7 +3,7 @@ const path = require('path');
 const { levelFromXp } = require('./levels');
 
 const CDN = 'https://community.cloudflare.steamstatic.com/economy/image/';
-const CACHE_FILE = path.join(__dirname, '..', 'data', 'sets.json');
+const CACHE_FILE = path.join(process.env.BADGE_DATA_DIR || path.join(__dirname, '..', 'data'), 'sets.json');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function jget(url) {

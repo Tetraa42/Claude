@@ -1,0 +1,26 @@
+name: Build Windows installer
+on:
+  push:
+    branches: [claude/lucid-cerf-uqb1ks]
+    paths: ['steam-badge-trader/**', '.github/workflows/build-windows.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults: { run: { working-directory: steam-badge-trader } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with: { name: Steam-Badge-Trader-Setup, path: steam-badge-trader/dist/*.exe }
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: installer-${{ github.run_number }}
+          name: Steam Badge Trader (installeur Windows) #${{ github.run_number }}
+          files: steam-badge-trader/dist/*.exe
+          prerelease: true

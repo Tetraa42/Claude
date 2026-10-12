@@ -2,7 +2,10 @@
 
 Application locale (Node.js + navigateur) pour monter de niveau Steam : elle liste les sets de cartes à compléter **du moins cher au plus cher**, montre le niveau atteignable, et envoie une offre d'échange en un clic.
 
-## Lancer
+## Installer sur Windows (le plus simple)
+Télécharge `Steam-Badge-Trader-Setup-x.x.x.exe` depuis l'onglet **Releases** du dépôt GitHub, double-clique, installe : un raccourci est créé sur le **Bureau** et dans le **menu Démarrer**. Au premier lancement, la fenêtre **Réglages** s'ouvre : colle ton profil + ta clé API Steam.
+
+## Lancer depuis le code
 ```bash
 cd steam-badge-trader
 npm install

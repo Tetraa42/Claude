@@ -27,3 +27,5 @@ dialog{background:var(--card);color:var(--tx);border:1px solid var(--line);borde
 .go{width:100%;margin-top:6px;padding:15px;font-size:17px;font-weight:800;border:0;border-radius:14px;color:#04101f;background:linear-gradient(90deg,var(--ok),var(--ac));box-shadow:0 8px 28px #34d39944}.go:disabled{opacity:.4;cursor:not-allowed;box-shadow:none}
 #toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,120px);background:var(--ok);color:#04101f;padding:12px 20px;border-radius:12px;font-weight:700;transition:transform .3s;max-width:90vw}#toast.show{transform:translate(-50%,0)}#toast.bad{background:#f87171}
 [hidden]{display:none!important}
+select{background:var(--bg2);border:1px solid var(--line);color:var(--tx);border-radius:10px;padding:9px 12px;font:inherit;display:block;margin:6px 0 10px}
+details{margin:6px 0 14px;color:var(--mut)}summary{cursor:pointer;margin-bottom:8px}.note.ok{color:var(--ok)}.mut{color:var(--mut)}dialog a{color:var(--ac)}
