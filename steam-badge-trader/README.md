@@ -68,3 +68,7 @@ Pour ton vrai compte : copie `.env.example` en `.env`, mets ta clé API Steam (h
 - **📒 Journal** des échanges, achats, ventes et fabrications (automatique pour les offres envoyées / boosters fabriqués, bouton « ✔ Fait » dans le plan d'échanges).
 - **🤖 Mode auto** (ex-« Vérifier les jeux ») : page où l'on coche les cartes voulues (bot ou ami, avec prix d'achat et de rachat) et les cartes à donner ; l'app prépare des échanges de **6 cartes maximum de chaque côté**. Bot : ouvre la page du jeu dans une fenêtre déjà connectée, cartes surlignées ; amis : envoi de l'offre Steam puis ouverture de la page de l'offre.
 - Tuiles de badges : cartes manquantes en gros, colorées (bot / ami / les deux) avec compteurs ; filtre « Tous mes badges » ; amis mémorisés entre deux lancements ; historique des échanges SteamCardExchange importé dans le Journal.
+- **10 nouveaux thèmes** dessinés pour l'app (aucune ressource externe) : Écran CRT, Ordi ambre 80s, Néon, Cyberpunk, Steampunk, Synthwave, Game Boy, Vaporwave, Parchemin, Arcade.
+- **Mode auto = la grande barre colorée du haut** (rouge → orange → vert) ; tous les scans et actions sont dans le menu déroulant « ☰ Menu ».
+- **Page 👥 Amis** : pour chaque ami, les badges où il lui manque des cartes que tu as en double, et ce qu'il a pour toi ; diagnostic de lecture copiable.
+- Cartes manquantes dans l'ordre du set (colorées), cliquables pour les ajouter aux souhaits ; bouton « 🔎 Vérifier doubles & manquantes du bot » dans le Mode auto.

@@ -177,14 +177,15 @@ function parseGameText(text) {
     const m = /^stock\s*:\s*(\d+)/i.exec(lines[i]);
     if (!m) continue;
     const name = lines[i - 1];
-    let worth = null, price = null, quick = false;
+    let worth = null, price = null, quick = false, over = /overstock/i.test(lines[i]);
     for (let j = i + 1; j < Math.min(lines.length, i + 6) && !/^stock\s*:/i.test(lines[j]); j++) {
       if (/^worth/i.test(lines[j])) worth = val(lines[j]);
       else if (/^price/i.test(lines[j])) price = val(lines[j]);
       else if (/quick-?trade/i.test(lines[j])) quick = true;
+      else if (/overstock/i.test(lines[j])) over = true;
     }
     if (!name || /^(worth|price|stock)/i.test(name)) continue;
-    out[norm(name)] = { stock: Number(m[1]), price, worth, quick, last: /last card/i.test(lines[i]), name, qi: quick ? qn++ : -1 };
+    out[norm(name)] = { stock: Number(m[1]), price, worth, quick, over, last: /last card/i.test(lines[i]), name, qi: quick ? qn++ : -1 };
   }
   return out;
 }

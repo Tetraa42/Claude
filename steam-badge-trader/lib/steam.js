@@ -145,7 +145,11 @@ async function getInventory(id, onProgress) {
   const cards = [], boosters = [], gems = { gems: 0, sacks: 0 };
   let last = '', seen = 0;
   for (let i = 0; i < 60; i++) {
-    const d = await jget(`https://steamcommunity.com/inventory/${id}/753/6?l=english&count=2000${last ? '&start_assetid=' + last : ''}`);
+    let d;
+    for (const count of [2000, 500, 75]) { // l'inventaire d'un autre joueur est parfois refusé (HTTP 400) avec un gros « count » : on réessaie plus petit
+      try { d = await jget(`https://steamcommunity.com/inventory/${id}/753/6?l=english&count=${count}${last ? '&start_assetid=' + last : ''}`); break; }
+      catch (e) { if (!/HTTP 400/.test(e.message) || count === 75) throw e; }
+    }
     if (!d || !d.assets) break;
     const desc = new Map(d.descriptions.map((x) => [x.classid + '_' + x.instanceid, x]));
     seen += d.assets.length;

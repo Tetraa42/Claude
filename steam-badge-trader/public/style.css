@@ -147,3 +147,52 @@ dialog>form[method=dialog]{position:sticky;top:0;z-index:60;height:0}
 .trade{border:1px solid var(--line);border-radius:14px;padding:12px;margin:0 0 10px;background:var(--bg2)}.trade.no{border-color:#f59e0b}
 .tcols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:8px 0}.tc{display:flex;flex-wrap:wrap;gap:6px}
 .tcard{display:inline-flex;flex-direction:column;align-items:center;width:64px;text-align:center}.tcard img{width:56px;height:56px;border-radius:8px;object-fit:cover}.tcard small{font-size:10px;color:var(--mut);max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ===== thèmes originaux (aucune ressource externe) ===== */
+[data-theme=crt]{--bg:#020b04;--bg2:#05140a;--card:#082010;--line:#0f5226;--tx:#8dff9d;--mut:#4fb765;--ac:#39ff6a;--ac2:#00c853;--ok:#b6ff6a;--warn:#ffe45c;--g1:#00ff4018;--g2:#00ff4010;--on:#021a08}
+[data-theme=ambre]{--bg:#110900;--bg2:#1c1000;--card:#271700;--line:#6b4300;--tx:#ffbf3d;--mut:#b88414;--ac:#ffb000;--ac2:#ff7a00;--ok:#ffd966;--warn:#ff9a3d;--g1:#ffa00014;--g2:#ff6a0010;--on:#1a0e00}
+[data-theme=neon]{--bg:#06020f;--bg2:#0d0620;--card:#140a30;--line:#4a1b7a;--tx:#f6e9ff;--mut:#b189e0;--ac:#ff2bd6;--ac2:#00f0ff;--ok:#39ff9c;--warn:#fff200;--g1:#ff2bd633;--g2:#00f0ff22;--on:#12031f}
+[data-theme=cyberpunk]{--bg:#09090f;--bg2:#12121c;--card:#191927;--line:#34344d;--tx:#f2f2e6;--mut:#9a9ab8;--ac:#fcee0a;--ac2:#00e5ff;--ok:#00ff9f;--warn:#ff3c6e;--g1:#fcee0a14;--g2:#ff3c6e1c;--on:#121200}
+[data-theme=steampunk]{--bg:#1b130c;--bg2:#271b12;--card:#33241a;--line:#6e4c2c;--tx:#f1e1c2;--mut:#bfa078;--ac:#d09a45;--ac2:#b4622d;--ok:#9fbf6a;--warn:#e8b04b;--g1:#a0662633;--g2:#5b3a1c33;--on:#1b130c}
+[data-theme=synthwave]{--bg:#12042a;--bg2:#1b0940;--card:#260f55;--line:#5a2a95;--tx:#fdeaff;--mut:#c19be0;--ac:#ff4fd8;--ac2:#ffb347;--ok:#5ef2c6;--warn:#ffd23f;--g1:#ff2e9755;--g2:#00d9ff30;--on:#1a0536}
+[data-theme=gameboy]{--bg:#0f380f;--bg2:#174a17;--card:#1f5a1f;--line:#306230;--tx:#c8e86a;--mut:#8bac0f;--ac:#d6f06a;--ac2:#9bbc0f;--ok:#e1f78e;--warn:#e1f78e;--g1:#9bbc0f14;--g2:#8bac0f0f;--on:#0f380f}
+[data-theme=vaporwave]{--bg:#2a1a4a;--bg2:#36215e;--card:#432a73;--line:#6f4fb0;--tx:#fff2fd;--mut:#d3b8f0;--ac:#ff9ff3;--ac2:#7df9ff;--ok:#b9ffd9;--warn:#ffe29a;--g1:#ff9ff340;--g2:#7df9ff30;--on:#2a1a4a}
+[data-theme=parchemin]{--bg:#efe1c3;--bg2:#f7ecd4;--card:#fbf4e2;--line:#cdb98a;--tx:#3b2a14;--mut:#7b6542;--ac:#9a5b13;--ac2:#5f7d1e;--ok:#3f7d20;--warn:#a05a00;--g1:#d9b87a55;--g2:#c9a05a33;--on:#fff8e8}
+[data-theme=arcade]{--bg:#000;--bg2:#0a0a12;--card:#11111c;--line:#3a3a52;--tx:#ffffff;--mut:#a0a0c0;--ac:#ffe600;--ac2:#ff3b30;--ok:#00e676;--warn:#ff9100;--g1:#ffe60010;--g2:#ff3b3010;--on:#000}
+/* écrans à tube (lignes de balayage) */
+[data-theme=crt] body::after,[data-theme=ambre] body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:9999;background:repeating-linear-gradient(0deg,rgba(0,0,0,.24) 0 1px,transparent 1px 3px);mix-blend-mode:multiply}
+[data-theme=crt] body,[data-theme=ambre] body,[data-theme=gameboy] body,[data-theme=arcade] body{font-family:"Courier New",ui-monospace,Consolas,monospace}
+[data-theme=crt] body{text-shadow:0 0 5px #39ff6a55}[data-theme=ambre] body{text-shadow:0 0 5px #ffb00055}
+[data-theme=crt] button,[data-theme=ambre] button,[data-theme=gameboy] button,[data-theme=arcade] button,[data-theme=crt] .set,[data-theme=ambre] .set,[data-theme=gameboy] .set,[data-theme=arcade] .set,[data-theme=crt] input,[data-theme=ambre] input,[data-theme=gameboy] input,[data-theme=arcade] input{border-radius:2px}
+[data-theme=arcade] .set,[data-theme=arcade] .ready,[data-theme=arcade] .cbox{border-width:2px}
+/* néon : lueurs */
+[data-theme=neon] h1,[data-theme=neon] .bar h2,[data-theme=neon] h3{text-shadow:0 0 10px var(--ac),0 0 22px #ff2bd655}
+[data-theme=neon] .set,[data-theme=neon] .cbox,[data-theme=neon] .ready{box-shadow:0 0 0 1px #ff2bd644,0 0 18px #00f0ff22}
+[data-theme=neon] .who img{box-shadow:0 0 20px var(--ac2)}
+/* cyberpunk : angles coupés, majuscules */
+[data-theme=cyberpunk] h1,[data-theme=cyberpunk] .bar h2,[data-theme=cyberpunk] .set h3{text-transform:uppercase;letter-spacing:.08em}
+[data-theme=cyberpunk] .set,[data-theme=cyberpunk] .cbox,[data-theme=cyberpunk] .ready,[data-theme=cyberpunk] .trade,[data-theme=cyberpunk] button,[data-theme=cyberpunk] input{border-radius:0;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))}
+[data-theme=cyberpunk] .set{border-left:3px solid var(--ac)}
+/* steampunk et parchemin : empattements, cadres cuivrés */
+[data-theme=steampunk] body,[data-theme=parchemin] body{font-family:Georgia,"Palatino Linotype",Palatino,serif}
+[data-theme=steampunk] .set,[data-theme=steampunk] .cbox,[data-theme=steampunk] .ready{border:2px solid #8a5f33;box-shadow:inset 0 0 0 1px #d09a4555,0 4px 14px #0008}
+[data-theme=steampunk] h1,[data-theme=steampunk] .bar h2{letter-spacing:.04em;text-shadow:0 1px 0 #0009}
+[data-theme=parchemin] .set,[data-theme=parchemin] .cbox{box-shadow:0 2px 10px #7b654222}
+/* synthwave / vaporwave : dégradés */
+[data-theme=synthwave] body{background:radial-gradient(900px 500px at 50% -10%,#ff2e9766,transparent),radial-gradient(900px 600px at 100% 100%,#00d9ff33,transparent),var(--bg)}
+[data-theme=synthwave] .hero{background:linear-gradient(180deg,#ff2e9733,transparent)}
+[data-theme=vaporwave] body{background:linear-gradient(160deg,#2a1a4a,#4a2a7a 45%,#1f5a7a)}
+/* barre du haut : Mode auto + menu déroulant */
+.topbar{display:flex;gap:12px;align-items:stretch;margin:0 0 14px;flex-wrap:wrap}.topbar .ready{flex:1 1 420px;margin:0;cursor:pointer;transition:transform .15s,box-shadow .15s}.topbar .ready:hover{transform:translateY(-2px);box-shadow:0 8px 26px color-mix(in srgb,var(--c) 40%,transparent)}
+.ready .rhead b{font-size:19px;letter-spacing:.06em}.ready .rsub{color:var(--mut);font-size:13px;margin:2px 0 0 24px}
+.menuwrap{position:relative;align-self:flex-start}.menubtn{padding:14px 18px;border-radius:14px;font-weight:700}
+.menu{position:absolute;right:0;top:calc(100% + 8px);z-index:50;width:min(920px,92vw);background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;box-shadow:0 18px 50px #000a}
+.menu .scans{margin:0}.menuact{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.menu[hidden]{display:none}
+/* cartes dans l'ordre du set : manquantes colorées, cliquables */
+.fan .fc{position:relative;flex:0 1 76px;min-width:0;margin-left:-8px;cursor:pointer}
+.fan .fc img{margin:0;width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;border:3px solid #ef4444;opacity:1;filter:none;box-shadow:0 6px 14px #0008;background:var(--bg2);flex:none}
+.fan .fc.cbot img{border-color:var(--cbot)}.fan .fc.cfr img{border-color:var(--cfr)}.fan .fc.both img{border-color:var(--cbot);outline:3px solid var(--cfr);outline-offset:0}
+.fan .fc .st{position:absolute;right:3px;top:3px;font-size:13px;line-height:1.1;background:#000b;border-radius:6px;padding:0 3px;color:#facc15}
+.fan .fc.wished img{box-shadow:0 0 0 2px #facc15,0 6px 14px #0008}.fan .fc:hover{transform:translateY(-3px);z-index:2}
+details.cbox>summary{cursor:pointer}

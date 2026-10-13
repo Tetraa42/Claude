@@ -13,7 +13,10 @@ const basket = new Set(lsGet('sbt.basket', []));
 const saveBasket = () => lsSet('sbt.basket', [...basket]);
 const T = { source: 'bot', friendId: '', friends: [], pv: null, askSel: new Set(), giveSel: new Set() };
 
-const THEMES = [['nuit', 'Nuit', '#66c0f4'], ['steam', 'Steam', '#1a9fff'], ['clair', 'Clair', '#f3f6fc'], ['violet', 'Violet', '#c084fc'], ['foret', 'Forêt', '#4ade80'], ['braise', 'Braise', '#fb923c'], ['ocean', 'Océan', '#22d3ee'], ['sakura', 'Sakura', '#f9a8d4'], ['noir', 'Noir', '#e5e7eb']];
+const THEMES = [['nuit', 'Nuit', '#66c0f4'], ['steam', 'Steam', '#1a9fff'], ['clair', 'Clair', '#f3f6fc'], ['violet', 'Violet', '#c084fc'], ['foret', 'Forêt', '#4ade80'], ['braise', 'Braise', '#fb923c'], ['ocean', 'Océan', '#22d3ee'], ['sakura', 'Sakura', '#f9a8d4'], ['noir', 'Noir', '#e5e7eb'],
+  ['crt', 'Écran CRT (console)', 'linear-gradient(135deg,#020b04,#39ff6a)'], ['ambre', 'Ordi ambre 80s', 'linear-gradient(135deg,#110900,#ffb000)'], ['neon', 'Néon', 'linear-gradient(135deg,#ff2bd6,#00f0ff)'], ['cyberpunk', 'Cyberpunk', 'linear-gradient(135deg,#fcee0a,#00e5ff)'],
+  ['steampunk', 'Steampunk', 'linear-gradient(135deg,#b4622d,#d09a45)'], ['synthwave', 'Synthwave', 'linear-gradient(135deg,#ff4fd8,#ffb347)'], ['gameboy', 'Game Boy', 'linear-gradient(135deg,#0f380f,#9bbc0f)'], ['vaporwave', 'Vaporwave', 'linear-gradient(135deg,#ff9ff3,#7df9ff)'],
+  ['parchemin', 'Parchemin', 'linear-gradient(135deg,#efe1c3,#9a5b13)'], ['arcade', 'Arcade', 'linear-gradient(135deg,#ffe600,#ff3b30)']];
 const FILTERS = [
   ['all', 'Tous', () => true],
   ['near', '🎯 Presque à 100 %', (s) => s.missingCount > 0 && s.missingCount <= 2],
@@ -55,7 +58,6 @@ const SCANS = [
   ['gems', '💎', 'Gemmes', 'Scanner mes gemmes'],
   ['bot', '🤖', 'Bot (SCE)', 'Lire l\'inventaire du bot SteamCardExchange'],
   ['friends', '👥', 'Amis', 'Lire les inventaires de mes amis (cartes qu\'ils ont pour toi)'],
-  ['verify', '🤖', 'Mode auto', 'Vérifier les jeux chez le bot et préparer des échanges tout prêts (6 cartes max de chaque côté)'],
   ['balance', '💳', 'Solde de crédits', 'Lire mon solde sur SteamCardExchange'],
 ];
 const fmtEta = (s) => (s == null ? '' : s < 90 ? `~${Math.max(1, Math.round(s))} s` : `~${Math.ceil(s / 60)} min`);
@@ -94,7 +96,6 @@ $('#scans').addEventListener('click', safe(async (e) => {
   const b = e.target.closest('[data-scan]'); if (!b) return;
   const k = b.dataset.scan;
   if (b.dataset.state === 'running') return; // déjà en cours : le bouton ■ permet de l'arrêter
-  if (k === 'verify') return openAuto();
   startScan(k);
 }));
 async function startScan(k) {
@@ -105,28 +106,26 @@ async function startScan(k) {
 // ---------- bouton « prêt à échanger » : rouge → orange → vert, avec ce qu'il reste à faire ----------
 function renderReady() {
   const r = st.ready, box = $('#ready'); if (!r) return;
-  const sig = JSON.stringify([r, Object.values(st.tasks).map((t) => t.state)]); if (box._sig === sig) return; box._sig = sig;
+  const sig = JSON.stringify([r.level, r.pct, r.conds.map((c) => c.ok + c.label + c.pct), Object.values(st.tasks).map((t) => t.state + t.pct)]); if (box._sig === sig) return; box._sig = sig;
   box.className = 'ready ' + r.level; box.style.setProperty('--p', r.pct + '%');
-  const head = r.level === 'green' ? '✅ Tout est vérifié — prêt à échanger' : r.level === 'orange' ? '🟠 Presque prêt' : '🔴 Pas encore prêt à échanger';
+  const sub = r.level === 'green' ? 'Tout est vérifié : clique pour préparer tes échanges' : r.level === 'orange' ? 'Presque prêt : clique pour terminer et préparer tes échanges' : 'Pas encore prêt : clique, l\'app prépare tout';
   const todo = r.conds.filter((c) => !c.ok);
-  box.innerHTML = `<div class="rhead"><span class="rbadge"><i></i><b>${head}</b></span><span class="rpc">${r.pct} %</span></div>
+  box.innerHTML = `<div class="rhead"><span class="rbadge"><i></i><b>🤖 MODE AUTO</b></span><span class="rpc">${r.pct} %</span></div><div class="rsub">${sub}</div>
     <div class="rbar"><i></i></div>
-    ${todo.length ? `<div class="rtodo"><small>À faire :</small>${todo.map((c) => { const t = st.tasks[c.key]; const on = t && t.state === 'running'; return `<button class="rbtn ${on ? 'run' : ''}" data-do="${c.key}" title="${on ? 'En cours…' : 'Lancer'}">${on ? '⏳' : '▶'} ${esc(c.label)}${on ? ` · ${t.pct}%` : c.pct > 0 && c.pct < 100 ? ` · ${c.pct}%` : ''}</button>`; }).join('')}</div>` : ''}
-    ${r.level === 'green' ? renderPlan(r.plan) : ''}`;
-}
-function renderPlan(plan) {
-  if (!plan.length) return '<p class="mut small">Aucun jeu n\'est complétable pour le moment : le bot n\'a pas toutes les cartes manquantes d\'un seul jeu.</p>';
-  return `<div class="plan"><small>Échanges proposés (du moins cher au plus cher) — <button class="rbtn go" data-openauto>🤖 Ouvrir le Mode auto (échanges de 6 cartes max, avec amis)</button></small>${plan.map((g) => `
-    <div class="pitem ${g.feasible ? '' : 'no'}"><a class="rbtn go" href="${esc(g.url)}" target="_blank" rel="noopener" title="Ouvrir la page du jeu sur SteamCardExchange">⇄ ${esc(g.name)} — ${g.missing} carte(s) · ${g.total} cr</a>
-    <button class="ghost sm" data-done="${g.appid}" title="Note cet échange dans le journal">✔ Fait</button> <small>${g.buy.map((c) => `${esc(c.name)} (${c.price} cr)`).join(' · ')}${g.feasible ? (g.sell.length ? `<br>Paie avec le solde + revente de : ${g.sell.map((c) => `${esc(c.name)} (+${c.worth})`).join(', ')}` : '<br>Payé avec ton solde de crédits') : `<br>⚠ Il te manque ${g.short} crédit(s) (même en revendant tes doublons)`}</small></div>`).join('')}</div>`;
+    ${todo.length ? `<div class="rtodo"><small>Il manque :</small>${todo.map((c) => { const t = st.tasks[c.key]; const on = t && t.state === 'running'; return `<button class="rbtn ${on ? 'run' : ''}" data-do="${c.key}" title="${on ? 'En cours…' : 'Lancer'}">${on ? '⏳' : '▶'} ${esc(c.label)}${on ? ` · ${t.pct}%` : c.pct > 0 && c.pct < 100 ? ` · ${c.pct}%` : ''}</button>`; }).join('')}</div>` : ''}`;
 }
 $('#ready').addEventListener('click', safe(async (e) => {
-  const b = e.target.closest('[data-do]'); if (b) await startScan(b.dataset.do);
-  if (e.target.closest('[data-openauto]')) return openAuto();
-  const dn = e.target.closest('[data-done]');
-  if (dn) { const g = st.ready.plan.find((x) => x.appid == dn.dataset.done); if (!g) return; const sold = g.sell.reduce((t, c) => t + c.worth, 0);
-    await api('/api/journal/add', { type: 'buy', text: `Set « ${g.name} » (${g.missing} carte(s))${g.sell.length ? ` + revente de ${g.sell.length} doublon(s)` : ''}`, credits: +(sold - g.total).toFixed(2) }); toast('📒 Ajouté au journal'); poll(); }
+  const b = e.target.closest('[data-do]'); if (b) return startScan(b.dataset.do);
+  openAuto();
 }));
+$('#ready').addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openAuto(); } });
+// menu déroulant (scans et actions)
+const menu = $('#menu'), menuBtn = $('#menubtn');
+const setMenu = (on) => { menu.hidden = !on; menuBtn.setAttribute('aria-expanded', on); menuBtn.textContent = on ? '☰ Menu ▴' : '☰ Menu ▾'; };
+menuBtn.onclick = (e) => { e.stopPropagation(); setMenu(menu.hidden); };
+document.addEventListener('click', (e) => { if (!menu.hidden && !e.target.closest('.menuwrap')) setMenu(false); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) setMenu(false); });
+
 // ---------- liste de souhaits ----------
 function drawWish() {
   const w = st.wishlist || [], al = st.alerts || [], box = $('#wbody');
@@ -228,6 +227,24 @@ async function drawRare() {
   } catch (e) { box.innerHTML = `<h3 style="margin:22px 0 8px">💎 Badges rares à viser</h3><div class="sbox">${esc(e.message)}</div>`; }
 }
 $('#dreload').onclick = () => drawDeals();
+// ---------- amis : qui a besoin de mes doubles ----------
+let fSig = '';
+async function drawFriends() {
+  const box = $('#fbody');
+  try {
+    const d = await api('/api/friends/needs'), sig = JSON.stringify([d, st.friends.status]); if (sig === fSig) return; fSig = sig; $('#fdiag')._d = d.diag;
+    const head = `<p class="mut small">${d.hasAll ? `${d.total} ami(s) · ${friendsInfo()}${d.age ? ' · lu ' + ago(d.age) : ''}` : 'Pas encore lu : clique sur « Lire les inventaires des amis ».'}${st.friends.status === 'loading' ? ' · ⏳ lecture en cours…' : ''}</p>`;
+    if (!d.hasAll) { box.innerHTML = head + '<div class="sbox">Clique sur « Lire les inventaires des amis » : l\'app regarde leurs cartes pour trouver ceux à qui tes doublons permettent de finir un badge. Si leurs inventaires sont privés, ils n\'apparaîtront pas (le diagnostic dit pourquoi).</div>'; return; }
+    box.innerHTML = head + (d.friends.length ? d.friends.map((f) => `<div class="cbox sec2"><div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap"><div style="display:flex;gap:10px;align-items:center"><img src="${esc(f.avatar || '')}" alt="" style="width:40px;height:40px;border-radius:10px"><div><b>${esc(f.name)}</b><br><small class="mut">tu peux lui donner <b>${f.giveCount}</b> carte(s)${f.completes ? ` · <b class="ok">${f.completes} badge(s) à finir</b>` : ''}</small></div></div>
+      <a class="ghost sm" href="${esc(tradeUrl(f.steamid))}" target="_blank" rel="noopener">⇄ Page d'échange Steam</a></div>
+      <div class="flist" style="margin-top:8px">${f.games.map((g) => `<div class="frow ${g.completes && g.canGive.length ? 'hit' : ''}"><img src="${esc(g.banner)}" alt="" style="width:90px;height:42px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'"><div class="grow"><b>${esc(g.name)}</b> <small class="mut">· il a ${g.has}/${g.total} cartes, il lui en manque ${g.need}${g.level ? ' · badge niv. ' + g.level : ''}</small><br>
+        ${g.canGive.length ? `<small>🎁 tu peux lui donner${g.completes ? ' (<b class="ok">complète son set</b>)' : ''} :</small> <span class="tc">${g.canGive.map((c) => `<span class="tcard" title="${esc(c.name)}"><img src="${esc(c.img)}" alt=""><small>${esc(c.name)}</small></span>`).join('')}</span>` : ''}
+        ${g.iNeed.length ? `<br><small>⭐ il a pour toi :</small> <span class="tc">${g.iNeed.map((c) => `<span class="tcard" title="${esc(c.name)}"><img src="${esc(c.img)}" alt=""><small>${esc(c.name)}</small></span>`).join('')}</span>` : ''}</div></div>`).join('')}</div></div>`).join('')
+      : '<div class="sbox">Aucun ami n\'a besoin de tes doublons pour le moment (ou ils ont un inventaire privé : copie le diagnostic pour voir).</div>');
+  } catch (e) { box.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
+}
+$('#fscan').onclick = safe(async () => { await api('/api/scan/friends', {}); fSig = ''; poll(); });
+$('#fdiag').onclick = safe(async () => { const d = $('#fdiag')._d || (await api('/api/friends/needs')).diag; try { await navigator.clipboard.writeText(d); toast('Diagnostic des amis copié'); } catch { prompt('Copie ce diagnostic :', d); } });
 // ---------- journal ----------
 function drawJournal() {
   const box = $('#jbody'), j = st.journal || [], sig = JSON.stringify(j); if (box._sig === sig) return;
@@ -276,8 +293,10 @@ function autoHead() {
   const v = st.tasks.verify, f = st.friends, d = A.data; if (!d) return '';
   const vtxt = v.state === 'running' ? `<div class="rbar"><i style="width:${v.pct}%"></i></div><small>${esc(v.label || 'Vérification…')} · ${v.pct}%${v.eta ? ' · ~' + v.eta + ' s' : ''}</small> <button class="ghost sm" data-ax="stop">■ Arrêter</button>`
     : `<small>${v.doneAt ? '✔ jeux vérifiés ' + ago(v.doneAt) : 'Jeux pas encore vérifiés : les prix du site ne sont pas à jour.'}</small> <button class="ghost sm" data-ax="verify">${v.doneAt ? '↻ Revérifier' : '▶ Vérifier les jeux'}</button>`;
+  const r = st.ready, todo = r ? r.conds.filter((c) => !c.ok && c.key !== 'verify') : [];
+  const todoHtml = todo.length ? `<div class="row" style="gap:8px;flex-wrap:wrap;justify-content:flex-start;margin:0 0 6px"><small>Il manque :</small>${todo.map((c) => `<button class="rbtn" data-ax="do:${c.key}">▶ ${esc(c.label)}</button>`).join('')}</div>` : '';
   const ftxt = `<small>👥 amis : ${f.stats ? friendsInfo() : 'pas encore lus'}${f.t ? ' · ' + ago(f.t) : ''}</small> <button class="ghost sm" data-ax="friends">${f.status === 'loading' ? '⏳ lecture…' : '↻ Lire les amis'}</button>`;
-  return `<div class="row" style="gap:16px;flex-wrap:wrap;justify-content:flex-start"><span>💳 Solde : <b>${d.balance} cr</b></span><span>🃏 ${A.ask.size} carte(s) voulue(s)</span><span>♻ ${d.give.length} carte(s) à donner</span></div><div class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-start;margin:6px 0">${vtxt}</div><div class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-start;margin:0 0 8px">${ftxt}</div>`;
+  return `${todoHtml}<div class="row" style="gap:16px;flex-wrap:wrap;justify-content:flex-start"><span>💳 Solde : <b>${d.balance} cr</b></span><span>🃏 ${A.ask.size} carte(s) voulue(s)</span><span>♻ ${d.give.length} carte(s) à donner</span></div><div class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-start;margin:6px 0">${vtxt}</div><div class="row" style="gap:10px;flex-wrap:wrap;justify-content:flex-start;margin:0 0 8px">${ftxt} <button class="ghost sm" data-ax="botcheck" title="Relit chez le bot tous les jeux où tu as des doublons ou des cartes manquantes">🔎 Vérifier doubles & manquantes du bot</button></div>`;
 }
 function renderAuto() {
   const d = A.data; if (!d) return;
@@ -286,7 +305,11 @@ function renderAuto() {
     ${list.map((w) => { const src = A.ask.get(w.hash); return `<div class="arow ${src ? 'sel' : ''}"><input type="checkbox" data-aw="${esc(w.hash)}" ${src ? 'checked' : ''}><img src="${esc(w.img)}" alt=""><div class="grow"><b>${esc(w.name)}</b> <small class="mut">${esc(w.price ? money(w.price) : '')}</small><br>
       ${w.bot ? `<button class="chip cbot ${src === 'bot' ? 'on' : ''}" data-asrc="bot" data-h="${esc(w.hash)}" title="Prix d'achat chez le bot">🤖 achat ${w.bot.price} cr · rachat ${w.bot.worth} cr</button>` : ''}${w.friends.map((f) => `<button class="chip cfr ${src === f.steamid ? 'on' : ''}" data-asrc="${esc(f.steamid)}" data-h="${esc(w.hash)}">👥 ${esc(f.name)}</button>`).join('')}</div></div>`; }).join('')}</div>`).join('') || '<p class="mut small">Aucune carte voulue disponible chez le bot ou un ami. Lance « Vérifier les jeux » et « Lire les amis ».</p>';
   const giveHtml = d.give.map((g) => `<label class="arow ${A.give.has(String(g.assetid)) ? 'sel' : ''}"><input type="checkbox" data-ag="${esc(String(g.assetid))}" ${A.give.has(String(g.assetid)) ? 'checked' : ''}><img src="${esc(g.img)}" alt=""><div class="grow"><b>${esc(g.name)}</b><br><small class="mut">${esc(g.game)}</small></div><span class="chip cbot" title="Ce que le site te donne pour cette carte">rachat ${g.worth} cr</span></label>`).join('') || '<p class="mut small">Aucune carte à donner (doublons ou jeux au niveau 5).</p>';
-  $('#abody').innerHTML = `<div id="ahead">${autoHead()}</div>
+  const dupOk = d.botDupes.filter((x) => x.checked), dupSell = dupOk.filter((x) => !x.over), dupOver = dupOk.filter((x) => x.over);
+  const botBox = `<details class="cbox" open><summary><b>🔎 Contrôle du bot</b> <small class="mut">— ${dupOk.length}/${d.botDupes.length} de tes doublons vérifiés · ${d.wanted.filter((w) => w.bot).length} carte(s) manquante(s) que le bot a</small></summary>
+    ${d.botDupes.length ? `<p class="small" style="margin:8px 0 4px">♻ Mes doubles : <b class="ok">${dupSell.length} rachetés</b>${dupOver.length ? ` · <b style="color:var(--warn)">${dupOver.length} en surstock</b> (le bot n'en veut peut-être plus)` : ''}${d.botDupes.length - dupOk.length ? ` · <span class="mut">${d.botDupes.length - dupOk.length} pas encore vérifiés</span>` : ''}</p>
+      <div class="tc">${d.botDupes.slice(0, 60).map((x) => `<span class="tcard" title="${esc(x.name)} × ${x.count} — ${esc(x.game)}${x.checked ? '' : ' (pas vérifié)'}${x.over ? ' — surstock' : ''}"><img src="${esc(x.img)}" alt="" style="${x.checked ? '' : 'opacity:.45'}${x.over ? ';outline:2px solid var(--warn)' : ''}"><small>${x.worth} cr${x.count > 1 ? ' ×' + x.count : ''}</small></span>`).join('')}</div>` : '<p class="mut small">Aucun doublon.</p>'}</details>`;
+  $('#abody').innerHTML = `<div id="ahead">${autoHead()}</div>${botBox}
     <div class="agrid"><div class="cbox"><h4>🃏 Cartes que je veux <small class="mut">— coche et choisis la source</small></h4><div class="alist">${wantedHtml}</div></div>
     <div class="cbox"><h4>♻ Cartes que je donne <small class="mut">— rien de coché = choix automatique</small></h4><div class="alist">${giveHtml}</div></div></div>
     <h3 style="margin:16px 0 8px">Échanges proposés <small class="mut">(6 cartes maximum de chaque côté)</small></h3><div id="atrades">${tradesHtml()}</div>`;
@@ -314,7 +337,7 @@ $('#abody').addEventListener('click', safe(async (e) => {
   const sc = e.target.closest('[data-asrc]');
   if (sc) { e.preventDefault(); A.ask.set(sc.dataset.h, sc.dataset.asrc); A.user.add(sc.dataset.h); renderAuto(); return replan(); }
   const ax = e.target.closest('[data-ax]');
-  if (ax) { const k = ax.dataset.ax; if (k === 'stop') await api('/api/scan/verify/cancel', {}); else await api('/api/scan/' + (k === 'friends' ? 'friends' : 'verify'), {}); await poll(); $('#ahead').innerHTML = autoHead(); return; }
+  if (ax) { const k = ax.dataset.ax; if (k === 'stop') await api('/api/scan/verify/cancel', {}); else if (k === 'botcheck') await api('/api/botcheck', {}); else if (k.startsWith('do:')) await startScan(k.slice(3)); else await api('/api/scan/' + (k === 'friends' ? 'friends' : 'verify'), {}); await poll(); $('#ahead').innerHTML = autoHead(); return; }
   const tid = (e.target.closest('[data-t]') || {}).dataset; const t = tid && A.plan.trades.find((x) => x.id === tid.t);
   if (e.target.closest('[data-aopen]') && t) {
     for (const g of t.games) { const r = await api('/api/auto/open', { appid: g.appid, names: g.cards }); if (!r.opened) window.open(r.url, '_blank'); }
@@ -410,8 +433,8 @@ function render() {
 
 function showView() {
   document.querySelectorAll('#views button[data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === view));
-  $('#v-sets').hidden = view !== 'sets'; $('#v-boosters').hidden = view !== 'boosters'; $('#v-rank').hidden = view !== 'rank'; $('#v-wish').hidden = view !== 'wish'; $('#v-prog').hidden = view !== 'prog'; $('#v-deals').hidden = view !== 'deals'; $('#v-journal').hidden = view !== 'journal';
-  if (view === 'journal') drawJournal(); if (view === 'prog') drawProg(); if (view === 'deals') drawDeals(); if (view === 'wish') drawWish(); if (view === 'sets') draw(); if (view === 'boosters') drawBoosters(); if (view === 'rank') drawRank();
+  $('#v-sets').hidden = view !== 'sets'; $('#v-boosters').hidden = view !== 'boosters'; $('#v-rank').hidden = view !== 'rank'; $('#v-wish').hidden = view !== 'wish'; $('#v-prog').hidden = view !== 'prog'; $('#v-deals').hidden = view !== 'deals'; $('#v-journal').hidden = view !== 'journal'; $('#v-friends').hidden = view !== 'friends';
+  if (view === 'friends') drawFriends(); if (view === 'journal') drawJournal(); if (view === 'prog') drawProg(); if (view === 'deals') drawDeals(); if (view === 'wish') drawWish(); if (view === 'sets') draw(); if (view === 'boosters') drawBoosters(); if (view === 'rank') drawRank();
 }
 $('#views').onclick = (e) => {
   const b = e.target.closest('button[data-v]'); if (b) { view = prefs.view = b.dataset.v; savePrefs(); lastSig = ''; showView(); if (view === 'rank' && rankTab === 'global') loadGlobal(); }
@@ -427,8 +450,8 @@ function missClass(s, c) {
 const tradeUrl = (steamid) => `https://steamcommunity.com/tradeoffer/new/?partner=${(BigInt(steamid) - 76561197960265728n).toString()}`; // page d'échange Steam avec cet ami
 // ---------- sets ----------
 function draw() {
-  const q = $('#q').value.toLowerCase(), sort = $('#sort').value;
-  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botStock, s.friends.length, s.cost, s.worth, s.provisional, s.botChecked, s.botHas, s.friendsHave]), st.completed.length, (st.allBadges || []).length, st.friends.stats && st.friends.stats.cards, st.progress.running]);
+  const q = $('#q').value.toLowerCase(), sort = $('#sort').value, wished = new Set((st.wishlist || []).map((w) => w.hash));
+  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botStock, s.friends.length, s.cost, s.worth, s.provisional, s.botChecked, s.botHas, s.friendsHave]), st.completed.length, (st.wishlist || []).map((w) => w.hash).join(), (st.allBadges || []).length, st.friends.stats && st.friends.stats.cards, st.progress.running]);
   if (sig === lastSig) return; lastSig = sig;
   if (filter === 'done' || filter === 'allbadges') {
     const src = filter === 'done' ? st.completed : (st.allBadges || []);
@@ -447,9 +470,10 @@ function draw() {
   $('#grid').innerHTML = list.map((s) => `
   <article class="set"><img class="banner" data-n="${esc(s.name)}" data-detail="${s.appid}" src="${esc(s.banner)}" alt="" loading="lazy" onerror="fb(this)">
    <div class="body"><header><h3 data-detail="${s.appid}">${esc(s.name)}</h3><span class="pill">${s.badgeLevel ? 'Niv. ' + s.badgeLevel + ' → ' + (s.badgeLevel + 1) : 'Nouveau badge'}</span></header>
-    <div class="fan">${s.cards.filter((c) => c.owned || c.unknown).map((c) => c.unknown ? '<span class="ph" title="Carte pas encore connue"></span>' : `<img loading="lazy" src="${esc(c.img)}" title="${esc(c.name)} — possédée ×${c.owned}" alt="${esc(c.name)}">`).join('')}</div>
-    ${s.missingCount ? `<div class="missrow"><b>❌ Il te manque ${s.missingCount} carte(s)</b><div class="mc">${s.cards.filter((c) => !c.owned && !c.unknown).map((c) => { const fr = s.friends.filter((f) => f.have.includes(c.hash)); return `<span class="mcard ${missClass(s, c)}" title="${esc(c.name)} — ${esc(c.priceText || '')}${c.botCard ? (c.botCard.stock > 0 ? ` · 🤖 le bot l'a (${c.botCard.price != null ? c.botCard.price + ' cr' : ''})` : ' · 🤖 rupture chez le bot') : ''}${fr.length ? ' · 👥 ' + fr.map((f) => esc(f.name)).join(', ') : ''}"><img loading="lazy" src="${esc(c.img)}" alt=""><i>${botHas(c) ? '🤖' : ''}${fr.length ? '👥' + fr.length : ''}</i></span>`; }).join('')}</div>
-      <div class="cnt"><span class="c miss">❌ ${s.missingCount} manquante(s)</span><span class="c bot" title="${s.botChecked ? 'Vérifié carte par carte' : 'Estimation d\'après le tableau du bot : lance le Mode auto pour vérifier'}">🤖 bot : ${s.botHas}${s.botChecked ? '' : ' ~'}</span><span class="c fr" title="Cartes manquantes que tes amis ont">👥 amis : ${s.friendsHave}</span>${s.botChecked || st.friends.stats ? `<span class="c none" title="Cartes que ni le bot ni un ami n'a">∅ nulle part : ${s.nobody}</span>` : ''}</div></div>` : ''}
+    <div class="fan">${s.cards.map((c) => { if (c.unknown) return '<span class="ph" title="Carte pas encore connue"></span>'; if (c.owned) return `<img loading="lazy" src="${esc(c.img)}" title="${esc(c.name)} — possédée ×${c.owned}" alt="${esc(c.name)}">`;
+      const fr = s.friends.filter((f) => f.have.includes(c.hash)), w = wished.has(c.hash);
+      return `<span class="fc ${missClass(s, c) || 'none'} ${w ? 'wished' : ''}" data-wishcard="${esc(c.hash)}" title="${esc(c.name)} — ${esc(c.priceText || '')}${c.botCard ? (c.botCard.stock > 0 ? ` · 🤖 le bot l'a (${c.botCard.price != null ? c.botCard.price + ' cr' : ''})` : ' · 🤖 rupture chez le bot') : ''}${fr.length ? ' · 👥 ' + fr.map((f) => esc(f.name)).join(', ') : ''} — clique pour ${w ? 'retirer des' : 'ajouter aux'} souhaits"><img loading="lazy" src="${esc(c.img)}" alt="${esc(c.name)}"><b class="st">${w ? '★' : '☆'}</b></span>`; }).join('')}</div>
+    ${s.missingCount ? `<div class="cnt"><span class="c miss">❌ ${s.missingCount} manquante(s)</span><span class="c bot" title="${s.botChecked ? 'Vérifié carte par carte' : 'Estimation d\'après le tableau du bot : lance le Mode auto pour vérifier'}">🤖 bot : ${s.botHas}${s.botChecked ? '' : ' ~'}</span><span class="c fr" title="Cartes manquantes que tes amis ont">👥 amis : ${s.friendsHave}</span>${s.botChecked || st.friends.stats ? `<span class="c none" title="Cartes que ni le bot ni un ami n'a">∅ nulle part : ${s.nobody}</span>` : ''}</div>` : ''}
     <div class="meter"><i style="width:${(100 * s.ownedUnique) / s.total}%"></i></div>
     <div class="row"><span>${s.ownedUnique}/${s.total} cartes · ${s.dupes} doublon(s)</span><span>+100 XP</span></div>
     <div class="tags">${s.botChecked ? `<span class="tag bot" title="Vérifié carte par carte sur la page du jeu chez le bot">🤖 a ${s.botHas}/${s.missingCount} de tes cartes manquantes</span>` : s.botStock ? `<span class="tag bot" title="Cartes en stock chez le bot SteamCardExchange (pas encore vérifié carte par carte)">🤖 stock ${s.botStock} · ${s.botDistinct}/${s.total} différentes${s.botSets ? ' · ' + s.botSets + ' set(s) complet(s)' : ''}</span>` : ''}${s.friends.length ? `<span class="tag fr">👥 ${s.friends.length} ami(s)</span>` : ''}${s.drops ? `<span class="tag dr" title="Cartes qu'il te reste à obtenir en jouant à ce jeu">🎴 ${s.drops} à récupérer en jouant</span>` : ''}${s.worth != null ? `<span class="tag cr" title="Crédits que le bot te donne pour une carte de ce jeu">💳 ${s.worth} crédit(s)/carte</span>` : ''}</div>
@@ -457,14 +481,21 @@ function draw() {
     <button class="cta" data-app="${s.appid}">${s.cost == null ? '🔎 Voir le détail' : s.cost ? '⇄ Compléter par échange' : '🔨 Crafter le badge (Steam)'}</button></div>
   </article>`).join('') || `<p class="empty">${st.progress.running ? 'Analyse en cours, les sets apparaissent ici au fur et à mesure…' : 'Aucun set ne correspond à ce filtre.'}</p>`;
 }
-$('#grid').addEventListener('click', (e) => {
+$('#grid').addEventListener('click', safe(async (e) => {
+  const wc = e.target.closest('[data-wishcard]');
+  if (wc) {
+    const on = wc.classList.contains('wished');
+    await api(on ? '/api/wish/remove' : '/api/wish/add', { hash: wc.dataset.wishcard });
+    wc.classList.toggle('wished', !on); wc.querySelector('.st').textContent = on ? '☆' : '★';
+    toast(on ? 'Retirée de la liste de souhaits' : '⭐ Ajoutée aux souhaits : tu seras averti quand le bot ou un ami l\'aura'); return poll();
+  }
   const d = e.target.closest('[data-detail]'); if (d) return openDetail(Number(d.dataset.detail));
   const b = e.target.closest('.cta'); if (!b) return;
   const s = st.sets.find((x) => x.appid == b.dataset.app);
   if (s.cost == null) return openDetail(s.appid); // prix pas encore lu : la fiche le récupère
   if (!s.cost) return window.open(`${st.profile.url.replace(/\/$/, '')}/gamecards/${s.appid}/`, '_blank');
   toggleCards(s.cards.filter((c) => !c.owned).map((c) => c.hash), true); openTrade(); // « compléter » = tout le set manquant dans le panier
-});
+}));
 
 // ---------- fiche détaillée d'un badge ----------
 async function openDetail(appid) {

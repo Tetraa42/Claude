@@ -83,6 +83,12 @@ function fillFriends(F, S) {
     missing.forEach((c, k) => { if ((k + i) % 3 === 0) m.set(c.hash, [{ assetid: `f${i}_${k}`, tradable: true }]); });
     F.inv.set(f.steamid, m);
   });
+  F.all = new Map(); F.log = {};
+  F.list.forEach((f, i) => {
+    const per = new Map();
+    for (const st of S.sets) { const have = new Set(); st.cards.forEach((c, k) => { if ((k + i) % 2 === 0) have.add(c.hash); }); if (have.size) per.set(st.appid, have); }
+    F.all.set(f.steamid, per); F.log[f.steamid] = `${[...per.values()].reduce((t, x) => t + x.size, 0)} carte(s) en tout · démo`;
+  });
   F.done = F.total; F.status = 'ready';
 }
 

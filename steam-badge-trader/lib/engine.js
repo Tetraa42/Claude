@@ -16,7 +16,7 @@ const S = {
   bot: { status: 'idle', error: null, name: 'SteamCardExchange', count: 0, games: 0, t: 0 },
   retry: { at: 0, n: 0 }, gems: { gems: 0, sacks: 0 }, invT: 0, catalog: { t: 0, gems: { total: 0, tradable: 0, untradable: 0 }, map: {} }, gemVal: {},
   tasks: Object.fromEntries(['badges', 'cards', 'boosters', 'gems', 'bot', 'friends', 'balance', 'verify'].map((k) => [k, { state: 'idle', pct: 0, label: '', eta: null, estSec: 0, timeBased: false, t0: 0, doneAt: 0, error: null }])),
-  friends: { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map() },
+  friends: { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map(), all: new Map(), log: {} },
   rank: { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0, badges: new Map() },
   journal: [], events: null,
 };
@@ -72,13 +72,14 @@ function pace(nextLevelXp) {
 // Amis : on mémorise la liste et, pour chacun, les cartes manquantes qu'il a (sinon tout est perdu à la fermeture)
 function friendsDump() {
   const F = S.friends; if (!F.list.length || !F.inv.size) return null;
-  return { t: F.t || 0, stats: F.stats || null, list: F.list, inv: Object.fromEntries([...F.inv].map(([id, m]) => [id, Object.fromEntries([...m].map(([h, l]) => [h, l.map((c) => ({ assetid: c.assetid, hash: c.hash, name: c.name, img: c.img, tradable: true }))]))])) };
+  return { t: F.t || 0, stats: F.stats || null, log: F.log || {}, all: Object.fromEntries([...F.all].map(([id, m]) => [id, Object.fromEntries([...m].map(([a, set]) => [a, [...set]]))])), list: F.list, inv: Object.fromEntries([...F.inv].map(([id, m]) => [id, Object.fromEntries([...m].map(([h, l]) => [h, l.map((c) => ({ assetid: c.assetid, hash: c.hash, name: c.name, img: c.img, tradable: true }))]))])) };
 }
 function friendsRestore(d) {
   if (!d || !d.list) return;
   const F = S.friends;
   F.list = d.list; F.total = d.list.length; F.done = F.total; F.t = d.t || 0; F.stats = d.stats || null;
   F.inv = new Map(Object.entries(d.inv || {}).map(([id, o]) => [id, new Map(Object.entries(o))]));
+  F.log = d.log || {}; F.all = new Map(Object.entries(d.all || {}).map(([id, o]) => [id, new Map(Object.entries(o).map(([a, l]) => [Number(a), new Set(l)]))]));
   F.status = 'ready';
 }
 function saveState() {
@@ -297,7 +298,7 @@ async function scanFriendsBody(cfg) {
   const F = S.friends;
   if (F.status === 'loading') return;
   const gen = bump('friends'), dead = () => gens.friends !== gen;
-  Object.assign(F, { status: 'loading', error: null, done: 0, total: 0, inv: new Map(), stats: { scanned: 0, private: 0, errors: 0, withCards: 0, cards: 0 } });
+  Object.assign(F, { status: 'loading', error: null, done: 0, total: 0, inv: new Map(), all: new Map(), log: {}, stats: { scanned: 0, private: 0, errors: 0, withCards: 0, cards: 0 } });
   begin('friends', 'Lecture de ta liste d\'amis', 8);
   try {
     if (S.demo) { F.total = F.list.length; demo.fillFriends(F, S); F.stats = { scanned: F.total, private: 0, errors: 0, withCards: F.total, cards: 12 }; finish('friends'); return; }
@@ -305,14 +306,22 @@ async function scanFriendsBody(cfg) {
     F.total = F.list.length;
     prog('friends', 2, `Amis : 0/${F.total}`);
     while (S.running) await steam.sleep(2000); // on n'envoie pas deux rafales à Steam en même temps
-    const wanted = new Set(S.sets.flatMap((s) => s.cards.filter((c) => !c.owned).map((c) => c.hash)));
+    const wanted = new Set(S.sets.flatMap((s) => s.cards.filter((c) => !c.owned).map((c) => c.hash))), mineApps = new Set(S.sets.map((s) => s.appid));
+    if (S.sets.some((s) => s.provisional)) F.error = 'Tes sets ne sont pas encore tous analysés (prix en attente) : relance « Cartes & sets » pour voir toutes les cartes que tes amis ont.';
     for (const f of F.list) {
       if (dead()) return;
       try {
-        const cards = (await steam.getCards(f.steamid)).filter((c) => c.tradable && wanted.has(c.hash));
+        const every = await steam.getCards(f.steamid), cards = every.filter((c) => c.tradable && wanted.has(c.hash));
         F.inv.set(f.steamid, groupBy(cards, (c) => c.hash));
+        const per = new Map(); // toutes ses cartes des jeux que tu collectionnes : sert à savoir ce dont IL a besoin
+        for (const c of every) if (mineApps.has(c.appid)) (per.get(c.appid) || per.set(c.appid, new Set()).get(c.appid)).add(c.hash);
+        F.all.set(f.steamid, per);
+        F.log[f.steamid] = `${every.length} carte(s) en tout · ${cards.length} qui te manque(nt)`;
         F.stats.scanned++; if (cards.length) { F.stats.withCards++; F.stats.cards += cards.length; }
-      } catch (e) { if (e.code === 'CANCELLED') return; if (e.code === 'PRIVATE') F.stats.private++; else { F.stats.errors++; F.error = e.message; if (/429/.test(e.message)) break; } }
+      } catch (e) {
+        if (e.code === 'CANCELLED') return;
+        if (e.code === 'PRIVATE') { F.stats.private++; F.log[f.steamid] = 'inventaire privé (ou non lisible avec ta session Steam)'; } else { F.stats.errors++; F.error = e.message; F.log[f.steamid] = 'erreur : ' + e.message; if (/429/.test(e.message)) break; }
+      }
       F.done++;
       prog('friends', (100 * F.done) / Math.max(1, F.total), `Amis : ${F.done}/${F.total}`);
       S.tasks.friends.eta = Math.ceil((F.total - F.done) * 3.2);
@@ -417,14 +426,14 @@ async function checkGameAll(appid, cfg, cpc, only) {
 // ---------- vérification de tous les jeux candidats (page du jeu chez le bot) ----------
 const VERIFY_TTL = 6 * 3600e3, VERIFY_MAX = 60;
 // Jeux à vérifier : ceux où il manque des cartes ET où le bot a au moins une carte en stock (les moins chers d'abord).
-function verifyCandidates() {
-  return S.sets.filter((s) => !s.provisional && s.missingCount > 0 && (sce.lookup(s.appid, s.name) || {}).stock > 0)
-    .sort((a, b) => (a.missingCount - b.missingCount) || ((a.cost || 0) - (b.cost || 0))).slice(0, VERIFY_MAX);
+function verifyCandidates(all) {
+  return S.sets.filter((s) => !s.provisional && (all ? s.missingCount > 0 || s.dupes > 0 : s.missingCount > 0 && (sce.lookup(s.appid, s.name) || {}).stock > 0))
+    .sort((a, b) => (a.missingCount - b.missingCount) || ((a.cost || 0) - (b.cost || 0))).slice(0, all ? 100 : VERIFY_MAX);
 }
 const verified = (appid) => sce.hasGame(appid) && sce.gameAge(appid) < VERIFY_TTL;
-async function scanVerify() {
+async function scanVerify(opt) {
   if (running('verify')) return;
-  const gen = bump('verify'), list = verifyCandidates().filter((s) => !verified(s.appid));
+  const o = opt && typeof opt === 'object' ? opt : {}, gen = bump('verify'), list = verifyCandidates(o.all).filter((s) => o.force || !verified(s.appid)); // all : aussi les jeux où tu as des doublons ; force : relit même les jeux récents
   begin('verify', `Vérification des jeux : 0/${list.length}`);
   if (!list.length) { finish('verify'); return; }
   let done = 0, failed = 0;
@@ -661,7 +670,11 @@ function autoData() {
   }
   wanted.sort((a, b) => (b.completable - a.completable) || (a.setCost || 0) - (b.setCost || 0) || a.appid - b.appid);
   const give = spareCards().map((c) => ({ assetid: c.assetid, hash: c.hash, name: c.name, game: c.game, appid: c.appid, img: c.img, worth: (sce.lookup(c.appid, c.game) || {}).worth || 0, price: (S.sets.find((x) => x.appid === c.appid) || { cards: [] }).cards.find((x) => x.hash === c.hash)?.price || 0 })).sort((a, b) => b.worth - a.worth);
-  return { balance: bal, wanted, give, verified: S.tasks.verify.doneAt, friendsAge: S.friends.t || 0 };
+  const botDupes = [...groupBy(spareCards(), (c) => c.hash).values()].map((l) => {
+    const c = l[0], info = sce.cardInfo(c.appid, c.name), base = (sce.lookup(c.appid, c.game) || {}).worth;
+    return { hash: c.hash, name: c.name, game: c.game, appid: c.appid, img: c.img, count: l.length, worth: info && info.worth != null ? info.worth : base || 0, stock: info ? info.stock : null, over: !!(info && info.over), checked: !!info };
+  }).sort((a, b) => b.worth - a.worth);
+  return { balance: bal, wanted, give, botDupes, verified: S.tasks.verify.doneAt, friendsAge: S.friends.t || 0 };
 }
 // asks : [{ hash, src: 'bot' | steamid }] · giveIds : assetids choisis (vide = choix automatique)
 function autoPlan(asks, giveIds) {
@@ -710,6 +723,29 @@ function importSceTrades() {
     S.journal.push({ id: 'sce-' + t.id, t: t.t, type: t.yours && t.bots ? 'trade' : t.bots ? 'buy' : 'sell', text: `Échange SteamCardExchange n°${t.id} : tes cartes ${t.yours} cr · cartes du bot ${t.bots} cr`, credits: net, auto: true }); n++;
   }
   if (n) { S.journal.sort((a, b) => b.t - a.t); if (S.journal.length > 1000) S.journal.length = 1000; saveState(); }
+}
+
+// ---------- 👥 ce dont tes amis ont besoin : cartes que tu as en double et qui leur manquent pour finir un badge ----------
+function friendNeeds() {
+  const F = S.friends, spare = spareCards(), spareByApp = groupBy(spare, (c) => c.appid), out = [];
+  for (const f of F.list) {
+    const per = F.all.get(f.steamid); if (!per) continue;
+    const lv = new Map(((S.rank.badges || new Map()).get(f.steamid) || []).map((b) => [b.appid, b.level])), inv = F.inv.get(f.steamid) || new Map(), games = [];
+    for (const s of S.sets) {
+      if (s.provisional) continue;
+      const owned = per.get(s.appid); if (!owned || !owned.size || (lv.get(s.appid) || 0) >= 5) continue; // il ne collectionne pas ce jeu, ou son badge est déjà au niveau 5
+      const need = s.cards.filter((c) => !owned.has(c.hash));
+      const give = new Map(); for (const c of spareByApp.get(s.appid) || []) if (need.some((n) => n.hash === c.hash) && !give.has(c.hash)) give.set(c.hash, c);
+      const theirs = s.cards.filter((c) => !c.owned && !c.unknown && inv.has(c.hash));
+      if (!give.size && !theirs.length) continue;
+      const card = (c, a) => ({ hash: c.hash, name: c.name, img: c.img, assetid: a });
+      games.push({ appid: s.appid, name: s.name, banner: s.banner, total: s.total, has: owned.size, need: need.length, level: lv.get(s.appid) || 0, completes: give.size >= need.length, canGive: [...give.values()].map((c) => card(c, c.assetid)), iNeed: theirs.map((c) => card(c, (inv.get(c.hash) || [{}])[0].assetid)) });
+    }
+    if (games.length) out.push({ steamid: f.steamid, name: f.name, avatar: f.avatar, games: games.sort((a, b) => b.canGive.length - a.canGive.length), giveCount: games.reduce((t, g) => t + g.canGive.length, 0), completes: games.filter((g) => g.completes && g.canGive.length).length, log: F.log[f.steamid] || '' });
+  }
+  out.sort((a, b) => b.completes - a.completes || b.giveCount - a.giveCount);
+  const diag = `AMIS : ${F.list.length} · lus ${F.stats ? F.stats.scanned : 0} · privés ${F.stats ? F.stats.private : 0} · erreurs ${F.stats ? F.stats.errors : 0} · ayant des cartes pour toi ${F.stats ? F.stats.withCards : 0}\n` + (F.error ? 'DERNIÈRE ERREUR : ' + F.error + '\n' : '') + F.list.map((f) => `${f.name} : ${F.log[f.steamid] || 'pas lu'}`).join('\n');
+  return { friends: out, stats: F.stats || null, hasAll: F.all.size > 0, age: F.t || 0, total: F.list.length, diag };
 }
 
 function loadDemo() {
@@ -818,4 +854,4 @@ function spareCards() {
   }
   return out;
 }
-module.exports = { S, autoData, autoPlan, goalPlan, spareReport, eventAdd, eventRemove, compareFriend, rareTargets, journalAdd, journalRemove, deals, wishTarget, alertSet, exportData, importData, setsCsv, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };
+module.exports = { S, friendNeeds, autoData, autoPlan, goalPlan, spareReport, eventAdd, eventRemove, compareFriend, rareTargets, journalAdd, journalRemove, deals, wishTarget, alertSet, exportData, importData, setsCsv, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };
