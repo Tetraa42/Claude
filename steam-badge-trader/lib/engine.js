@@ -13,7 +13,7 @@ const PRICE_TTL = 6 * 3600e3, BOT_TTL = 30 * 60e3, RANK_TTL = 3600e3;
 const S = {
   running: false, refreshing: false, phase: '', done: 0, total: 0, needFetch: 0, fetched: 0, error: null, profile: null, names: new Map(), myCards: [], boosters: [],
   sets: [], completed: [], updatedAt: 0, demo: false, currency: 3, botOnly: true,
-  bot: { status: 'idle', error: null, name: 'SteamCardExchange', apps: null, count: 0, games: 0, t: 0 },
+  bot: { status: 'idle', error: null, name: 'SteamCardExchange', count: 0, games: 0, t: 0 },
   retry: { at: 0, n: 0 },
   friends: { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map() },
   rank: { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0 },
@@ -62,10 +62,10 @@ const isFresh = (ms = 10 * 60e3) => S.updatedAt && Date.now() - S.updatedAt < ms
 // L'inventaire Steam du bot est gigantesque (des centaines de pages → Steam répond « 429 »). On lit à la place le tableau
 // « Inventory » du site : une ligne par jeu avec la valeur en crédits, le stock et le nombre de cartes différentes en stock.
 function restoreBot() {
-  const info = sce.invMap(), B = S.bot;
-  if (!info.size) return;
-  const rows = [...info.values()].filter((r) => r.stock > 0);
-  Object.assign(B, { apps: new Set(rows.map((r) => r.appid)), count: rows.reduce((t, r) => t + r.stock, 0), games: rows.length, t: sce.status().invAge, status: 'ready', error: null });
+  const B = S.bot;
+  if (!sce.hasData()) return;
+  const t = sce.totals();
+  Object.assign(B, { count: t.cards, games: t.games, t: sce.status().invAge, status: 'ready', error: null });
 }
 async function loadBot(force = false) {
   const B = S.bot;
@@ -97,11 +97,14 @@ async function run(cfg, force = false) {
     S.myCards = inv.cards; S.boosters = inv.boosters;
     saveState();
 
-    if (cfg.botOnly && !(S.bot.apps && Date.now() - S.bot.t < BOT_TTL)) { S.phase = 'Lecture de l\'inventaire du bot (SteamCardExchange)'; await loadBot(); if (stale()) return; }
+    if (cfg.botOnly && !(S.bot.status === 'ready' && Date.now() - S.bot.t < BOT_TTL)) { S.phase = 'Lecture de l\'inventaire du bot (SteamCardExchange)'; await loadBot(); if (stale()) return; }
     const lvl = levelsMap();
     const byApp = groupBy(S.myCards, (c) => c.appid);
     let apps = [...byApp.entries()].filter(([a]) => (lvl.get(a) || 0) < 5);
-    if (cfg.botOnly && S.bot.apps) apps = apps.filter(([a]) => S.bot.apps.has(a)); // uniquement les jeux que le bot possède
+    if (cfg.botOnly && S.bot.status === 'ready') { // uniquement les jeux que le bot a en stock (si aucun nom ne correspond, on garde tout plutôt que de ne rien montrer)
+      const inStock = apps.filter(([a, mine]) => { const r = sce.lookup(a, mine[0].game); return r && r.stock > 0; });
+      if (inStock.length) apps = inStock;
+    }
     apps.sort((a, b) => b[1].length - a[1].length); // les plus avancés d'abord
     S.total = apps.length;
     S.needFetch = apps.filter(([a]) => !steam.cachedSet(a, cfg.currency)).length;
@@ -223,7 +226,7 @@ function loadDemo() { Object.assign(S, { demo: true, running: false, error: null
 // Ajoute au set les infos du bot SteamCardExchange (stock, valeur en crédits), des amis et des crédits.
 function enrichSet(s, cpc = 0) {
   const F = S.friends;
-  const bi = sce.botInfo(s.appid); // { worth, stock, cardsInSet, setsAvail, distinct }
+  const bi = sce.lookup(s.appid, s.name); // { worth, stock, cardsInSet, setsAvail, distinct }
   const missing = s.cards.filter((c) => !c.owned);
   const worth = bi ? bi.worth : cpc || null; // crédits que le bot donne pour une carte de ce jeu
   const cards = s.cards.map((c) => ({ ...c, assetids: undefined, credits: worth }));
@@ -245,10 +248,10 @@ function snapshot(opt = {}) {
   const p = S.profile, gain = sets.length * 100;
   const fetchLeft = Math.max(0, S.needFetch - S.fetched);
   const manual = opt.creditsBalance === '' || opt.creditsBalance == null ? null : Number(opt.creditsBalance);
-  const scest = sce.status(), info = sce.invMap();
-  const valueOf = (cards) => +cards.reduce((t, c) => t + ((info.get(c.appid) || {}).worth || 0), 0).toFixed(2);
-  const ownedValue = info.size ? valueOf(S.myCards) : null;        // ce que le bot te donnerait pour toutes tes cartes
-  const spareValue = info.size ? valueOf(spareCards()) : null;      // … pour tes seules cartes en trop
+  const scest = sce.status(), hasInv = sce.hasData();
+  const valueOf = (cards) => +cards.reduce((t, c) => t + ((sce.lookup(c.appid, c.game) || {}).worth || 0), 0).toFixed(2);
+  const ownedValue = hasInv ? valueOf(S.myCards) : null;        // ce que le bot te donnerait pour toutes tes cartes
+  const spareValue = hasInv ? valueOf(spareCards()) : null;      // … pour tes seules cartes en trop
   return {
     demo: S.demo, currency: S.currency, profile: p, sets, completed: S.completed, boosters, updatedAt: S.updatedAt,
     progress: { running: S.running, refreshing: S.refreshing, phase: S.phase, done: S.done, total: S.total, fetchLeft, etaMin: Math.ceil((fetchLeft * 3.1) / 60),

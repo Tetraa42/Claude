@@ -52,7 +52,8 @@ const sceBridge = {
       return await w.webContents.executeJavaScript(`({
         text: document.body.innerText.slice(0, 20000),
         links: [...document.querySelectorAll('a[href]')].slice(0, 400).map((a) => ({ t: (a.innerText || a.title || a.getAttribute('aria-label') || '').trim().replace(/\\s+/g, ' ').slice(0, 60), h: a.href })),
-        rows: ${opts.table ? "[...document.querySelectorAll('table tbody tr')].map((tr) => ({ c: [...tr.children].map((td) => td.innerText.trim().replace(/\\s+/g, ' ')), h: (tr.querySelector('a[href*=\"gamepage-appid-\"]') || {}).href || '' }))" : 'null'}
+        sample: ${opts.table ? "(document.querySelector('table tbody tr') || {}).outerHTML || ''" : "''"},
+        rows: ${opts.table ? "[...document.querySelectorAll('table tbody tr')].map((tr) => ({ c: [...tr.children].map((td) => td.innerText.trim().replace(/\\s+/g, ' ')), h: ((tr.outerHTML.match(/(?:appid[-=_:\"\\s]*|\\/apps\\/|\\/app\\/)(\\d{3,9})/i)) || [])[1] || '' }))" : 'null'}
       })`);
     } finally { w.destroy(); }
   },

@@ -59,15 +59,20 @@ async function login() {
 }
 
 // ---- inventaire du bot : une ligne par jeu (nom, valeur d'une carte en crédits, stock, cartes dans le set, sets complets / cartes différentes en stock) ----
+// Les noms de jeux du tableau ne sont pas toujours des liens : l'identifiant (appid) est cherché dans le code de la ligne,
+// et à défaut on rapproche les jeux par leur nom.
 function parseRow(r) {
   const c = r.c || [];
-  const a = /appid-(\d+)/.exec(r.h || '');
-  if (!a || c.length < 5) return null;
+  if (c.length < 4) return null;
+  const m0 = /(\d{3,9})/.exec(String(r.h || ''));
+  const appid = m0 ? Number(m0[1]) : null;
   const t = c.slice(-4); // worth, stock, cardsInSet, sets
   const worth = num(t[0]), stock = num(t[1]), cardsInSet = num(t[2]);
   const m = /(\d+)\s*\((\d+)\s*\/\s*(\d+)\)/.exec(t[3] || '');
   if ([worth, stock, cardsInSet].some(isNaN)) return null;
-  return { appid: Number(a[1]), name: c[c.length - 5] || c[0], worth, stock, cardsInSet, setsAvail: m ? Number(m[1]) : parseInt(t[3], 10) || 0, distinct: m ? Number(m[2]) : 0 };
+  const name = c.length >= 5 ? c[c.length - 5] : c[0];
+  if (!appid && !name) return null;
+  return { appid, name, worth, stock, cardsInSet, setsAvail: m ? Number(m[1]) : parseInt(t[3], 10) || 0, distinct: m ? Number(m[2]) : 0 };
 }
 async function readInventory(force = false) {
   const d = load();
@@ -75,25 +80,34 @@ async function readInventory(force = false) {
   if (!bridge) throw new Error(NO_SITE);
   const r = await bridge.scrape(INV_URL, { table: true });
   const rows = (r.rows || []).map(parseRow).filter(Boolean);
-  if (!rows.length) { d.debug = 'INVENTAIRE ILLISIBLE\n' + String(r.text || '').slice(0, 3000); save(); throw new Error('Inventaire SteamCardExchange illisible (tableau introuvable) : copie le diagnostic dans les Réglages.'); }
-  d.inv = { t: Date.now(), total: rows.length, rows: rows.map(({ name, ...r }) => r) }; // sans les noms : fichier plus léger
+  const withId = rows.filter((x) => x.appid).length;
+  d.debug = `INVENTAIRE: ${(r.rows || []).length} lignes lues, ${rows.length} comprises, ${withId} avec identifiant de jeu\nEXEMPLE HTML D'UNE LIGNE:\n${String(r.sample || '').slice(0, 1500)}\n\nEXEMPLE LIGNE: ${JSON.stringify((r.rows || [])[0] || null)}\n\n--- TEXTE\n${String(r.text || '').slice(0, 1200)}`;
+  if (!rows.length) { save(); throw new Error('Inventaire SteamCardExchange illisible (tableau introuvable) : copie le diagnostic dans les Réglages.'); }
+  d.inv = { t: Date.now(), total: rows.length, rows };
   save();
   return d.inv;
 }
-let mapCache = { inv: null, map: new Map(), stocked: 0 }; // la table fait ~15 000 lignes : on ne la reconstruit que si elle change
-const invMap = () => {
+const norm = (n) => String(n || '').toLowerCase().replace(/\(non-marketable\)/g, '').normalize('NFKD').replace(/[^\p{L}\p{N}]/gu, '');
+let idx = { inv: null, byApp: new Map(), byName: new Map(), stocked: 0 }; // la table fait ~15 000 lignes : on ne l'indexe que si elle change
+function index() {
   const inv = load().inv;
-  if (mapCache.inv !== inv) mapCache = { inv, map: new Map(((inv && inv.rows) || []).map((r) => [r.appid, r])), stocked: ((inv && inv.rows) || []).filter((r) => r.stock > 0).length };
-  return mapCache.map;
-};
-const botInfo = (appid) => invMap().get(appid) || null;
+  if (idx.inv !== inv) {
+    const byApp = new Map(), byName = new Map(); let stocked = 0;
+    for (const r of (inv && inv.rows) || []) { if (r.appid) byApp.set(r.appid, r); const k = norm(r.name); if (k && !byName.has(k)) byName.set(k, r); if (r.stock > 0) stocked++; }
+    idx = { inv, byApp, byName, stocked };
+  }
+  return idx;
+}
+const lookup = (appid, name) => { const i = index(); return i.byApp.get(appid) || (name ? i.byName.get(norm(name)) : null) || null; };
+const hasData = () => { const inv = load().inv; return !!(inv && inv.rows.length); };
+const totals = () => { const i = index(); return { games: i.stocked, cards: ((i.inv && i.inv.rows) || []).reduce((t, r) => t + (r.stock || 0), 0) }; };
 
 const setDemo = (rows) => { // données fictives, jamais écrites sur le disque
   demoOn = true; D = empty();
   Object.assign(D, { balance: 12.5, connected: true, balanceT: Date.now(), candidates: [{ value: 12.5, ctx: 'Your credits: 12.5' }], inv: { t: Date.now(), total: rows.length, rows } });
 };
 const status = () => { const d = load(); return { available: !!bridge || demoOn, connected: d.connected, balance: d.balance, balanceT: d.balanceT, candidates: d.candidates,
-  games: (invMap(), mapCache.stocked), invAge: d.inv ? d.inv.t : 0, hasDebug: !!d.debug }; };
+  games: index().stocked, invAge: d.inv ? d.inv.t : 0, hasDebug: !!d.debug }; };
 const debug = () => load().debug || '';
 const reset = () => { if (demoOn) { demoOn = false; D = null; } };
-module.exports = { setBridge, login, refreshBalance, readInventory, botInfo, invMap, status, debug, flush, setDemo, reset, findCredits, parseRow };
+module.exports = { setBridge, login, refreshBalance, readInventory, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };
