@@ -21,15 +21,29 @@ const { S } = engine;
 
 const base = { ...process.env };
 let env = {};
+const lbUrl = () => String(env.LEADERBOARD_URL || '').replace(/\/+$/, '');
 const reloadEnv = () => { env = { ...base, ...config.load(DATA_DIR) }; };
 reloadEnv();
 const isDemo = () => base.DEMO === '1' || !env.STEAM_API_KEY;
-const cfg = () => ({ key: env.STEAM_API_KEY, profile: env.STEAM_PROFILE, currency: Number(env.CURRENCY || 3), botProfile: env.BOT_PROFILE || engine.BOT_DEFAULT, botOnly: env.BOT_ONLY !== '0' });
+const cfg = () => ({ key: env.STEAM_API_KEY, profile: env.STEAM_PROFILE, currency: Number(env.CURRENCY || 3), botProfile: env.BOT_PROFILE || engine.BOT_DEFAULT, botOnly: env.BOT_ONLY !== '0', onDone: submitIfJoined });
+// Si tu as rejoint le classement, tes stats sont renvoyées au serveur après chaque analyse.
+function submitIfJoined() {
+  if (env.LB_JOINED !== '1' || !lbUrl() || !S.profile) return;
+  fetch(lbUrl() + '/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ steamid: S.profile.steamid }), signal: AbortSignal.timeout(8000) }).catch(() => {});
+}
 let updater = null;
 const setUpdater = (u) => { updater = u; };
 const setSce = (b) => sce.setBridge(b);
 
 const app = express();
+// L'app n'écoute qu'en local ; on refuse aussi les requêtes venant d'un autre site (DNS rebinding / CSRF).
+app.use((req, res, next) => {
+  const host = String(req.headers.host || '');
+  if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host)) return res.status(403).end('forbidden');
+  const origin = req.headers.origin;
+  if (origin && origin.replace(/^https?:\/\//, '') !== host) return res.status(403).end('forbidden');
+  next();
+});
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/art/avatar.svg', (_, res) => res.type('svg').send(demo.svgAvatar()));
@@ -53,8 +67,9 @@ app.get('/api/state', (_, res) => {
 });
 app.post('/api/refresh', (_, res) => {
   started = true;
+  const already = S.running && !isDemo();
   if (isDemo()) engine.loadDemo(); else engine.run(cfg()); // les sets déjà analysés sont relus depuis le cache
-  res.json({ ok: true });
+  res.json({ ok: true, already });
 });
 app.post('/api/update/check', async (_, res) => {
   if (!updater) return res.status(400).json({ error: 'Les mises à jour automatiques ne fonctionnent que dans le logiciel installé (pas en mode développeur).' });
@@ -77,13 +92,12 @@ app.post('/api/boosters/open', async (req, res) => {
 
 // ---- classements ----
 app.post('/api/rank/scan', (_, res) => { engine.scanRank(cfg()); res.json({ ok: true }); });
-const lbUrl = () => String(env.LEADERBOARD_URL || '').replace(/\/+$/, '');
 let globalCache = { t: 0, list: [] };
 app.get('/api/rank/global', async (_, res) => {
   try {
     if (isDemo()) return res.json({ list: ['Zed', 'Mia', 'Kai', 'Lou', 'Noa'].map((n, i) => ({ name: n, avatar: '/art/avatar.svg', level: 80 - i * 9, badgeCount: 400 - i * 50, rarity: 900 - i * 120, steamid: 'g' + i })), demo: true });
     if (!lbUrl()) return res.json({ list: [], missing: true });
-    if (Date.now() - globalCache.t > 30e3) globalCache = { t: Date.now(), list: (await (await fetch(lbUrl() + '/top?limit=100')).json()).list || [] };
+    if (Date.now() - globalCache.t > 30e3) globalCache = { t: Date.now(), list: (await (await fetch(lbUrl() + '/top?limit=100', { signal: AbortSignal.timeout(8000) })).json()).list || [] };
     res.json({ list: globalCache.list });
   } catch (e) { res.status(400).json({ error: 'Serveur de classement injoignable : ' + e.message }); }
 });
@@ -91,7 +105,8 @@ app.post('/api/rank/join', async (_, res) => {
   try {
     if (isDemo()) return res.json({ ok: true });
     if (!lbUrl()) throw new Error('Renseigne l\'adresse du serveur de classement dans les Réglages.');
-    const r = await fetch(lbUrl() + '/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ steamid: S.profile.steamid }) });
+    if (!S.profile) throw new Error('Profil pas encore chargé : patiente la fin de la lecture.');
+    const r = await fetch(lbUrl() + '/submit', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ steamid: S.profile.steamid }), signal: AbortSignal.timeout(8000) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Refusé par le serveur');
     config.save(DATA_DIR, { LB_JOINED: '1' }); reloadEnv(); globalCache.t = 0;
     res.json({ ok: true });
@@ -159,7 +174,7 @@ app.get('/api/trade/status', (_, res) => res.json({ ready: trader.state.ready, n
 app.post('/api/trade/login', async (req, res) => {
   try {
     if (isDemo()) return res.json({ status: 'ready' });
-    if (req.body.code && trader.state.needGuard) { trader.submitGuard(req.body.code); await new Promise((r) => setTimeout(r, 4000)); return res.json({ status: trader.state.ready ? 'ready' : 'guard' }); }
+    if (req.body.code && trader.state.needGuard) { trader.submitGuard(req.body.code); return res.json({ status: await trader.waitAfterGuard() }); }
     res.json({ status: await trader.login(env) });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -167,7 +182,10 @@ app.post('/api/trade/send', async (req, res) => {
   try {
     const { source, tradeUrl, friendId, give, ask } = req.body;
     if (isDemo()) return res.json({ id: '000000', status: 'sent', note: 'Mode démo : aucune offre réelle envoyée.' });
-    if (!ask.length) throw new Error('Rien à demander : aucune carte manquante chez cette source.');
+    if (!Array.isArray(ask) || !ask.length) throw new Error('Rien à demander : aucune carte manquante chez cette source.');
+    if (!Array.isArray(give)) throw new Error('Liste de cartes à donner invalide.');
+    const mine = new Set(S.myCards.map((c) => String(c.assetid)));
+    if (give.some((id) => !mine.has(String(id)))) throw new Error('Une carte à donner n\'est plus dans ton inventaire : clique sur Actualiser puis recommence.');
     const partner = source === 'friend' ? friendId : source === 'bot' ? (tradeUrl || env.BOT_TRADE_URL) : tradeUrl;
     if (!partner) throw new Error('Il manque le lien d\'échange du bot (Réglages) ou du partenaire.');
     res.json(await trader.sendOffer(env, { tradeUrl: partner, give, ask }));
@@ -186,7 +204,7 @@ app.post('/api/settings', (req, res) => {
   try {
     const before = RESCAN.map((k) => env[k] || '').join('|');
     config.save(DATA_DIR, req.body || {}); reloadEnv();
-    if (RESCAN.map((k) => env[k] || '').join('|') !== before) { sce.reset(); started = false; Object.assign(S, { profile: null, sets: [], completed: [], error: null }); try { fs.unlinkSync(path.join(DATA_DIR, 'state.json')); } catch {} } // seuls les réglages d'analyse relancent tout
+    if (RESCAN.map((k) => env[k] || '').join('|') !== before) { sce.reset(); started = false; engine.reset(); try { fs.unlinkSync(path.join(DATA_DIR, 'state.json')); } catch {} } // seuls les réglages d'analyse relancent tout
     res.json({ ok: true });
   }
   catch (e) { res.status(400).json({ error: e.message }); }

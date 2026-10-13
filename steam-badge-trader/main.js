@@ -2,7 +2,8 @@ const { app, BrowserWindow, shell, Menu } = require('electron');
 const path = require('path');
 
 process.env.BADGE_DATA_DIR = path.join(app.getPath('userData'), 'data'); // survit aux mises à jour du logiciel
-if (!app.requestSingleInstanceLock()) app.quit();
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) app.quit(); // une 2e fenêtre ne doit pas démarrer un 2e serveur
 
 // ---- mise à jour depuis les Releases GitHub ----
 const u = { status: 'idle', version: app.getVersion(), latest: null, progress: 0, error: null };
@@ -60,5 +61,5 @@ async function createWindow() {
   if (autoUpdater) setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 8000); // simple vérification discrète au démarrage
 }
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-app.whenReady().then(() => { Menu.setApplicationMenu(null); createWindow(); });
+if (gotLock) app.whenReady().then(() => { Menu.setApplicationMenu(null); createWindow(); });
 app.on('window-all-closed', () => app.quit());

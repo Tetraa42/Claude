@@ -1,6 +1,7 @@
 // Réglages enregistrés sur l'ordinateur de l'utilisateur. Les secrets sont chiffrés avec Electron safeStorage quand c'est possible.
 const fs = require('fs');
 const path = require('path');
+const { writeJsonAtomic } = require('./fsutil');
 const SECRET = ['STEAM_PASSWORD', 'STEAM_SHARED_SECRET', 'STEAM_IDENTITY_SECRET'];
 const KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL', 'THEME', 'SEEN_SETUP', 'BOT_ONLY', 'CREDITS_BALANCE', 'CREDITS_PER_CARD', 'LEADERBOARD_URL', 'LB_JOINED', ...SECRET];
 
@@ -12,7 +13,8 @@ const dec = (v) => { try { return v && v.startsWith('enc:') && safe ? safe.decry
 
 function load(dir) {
   const f = path.join(dir, 'config.json');
-  const raw = fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, 'utf8')) : {};
+  let raw = {};
+  try { raw = JSON.parse(fs.readFileSync(f, 'utf8')); } catch {} // fichier absent ou abîmé : on repart de réglages vides plutôt que de planter
   const out = {};
   for (const k of KEYS) if (raw[k]) out[k] = SECRET.includes(k) ? dec(raw[k]) : raw[k];
   return out;
@@ -25,7 +27,6 @@ function save(dir, values) {
   }
   const raw = {};
   for (const k of KEYS) if (next[k]) raw[k] = SECRET.includes(k) ? enc(next[k]) : next[k];
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(raw, null, 2));
+  writeJsonAtomic(path.join(dir, 'config.json'), raw);
 }
 module.exports = { load, save, KEYS, SECRET };

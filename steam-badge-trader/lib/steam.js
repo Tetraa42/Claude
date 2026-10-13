@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { levelFromXp } = require('./levels');
+const { writeJsonAtomic } = require('./fsutil');
 
 const CDN = 'https://community.cloudflare.steamstatic.com/economy/image/';
 const dataDir = () => process.env.BADGE_DATA_DIR || path.join(__dirname, '..', 'data');
@@ -129,19 +130,20 @@ const cacheFile = () => path.join(dataDir(), 'sets.json');
 function loadCache() { if (!setCache) { try { setCache = JSON.parse(fs.readFileSync(cacheFile(), 'utf8')); } catch { setCache = {}; } } return setCache; }
 function saveCache() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { try { fs.mkdirSync(dataDir(), { recursive: true }); fs.writeFileSync(cacheFile(), JSON.stringify(setCache)); } catch {} }, 1500);
+  saveTimer = setTimeout(() => { try { writeJsonAtomic(cacheFile(), setCache); } catch {} }, 1500);
 }
 function flushCache() { // appelé à la fermeture de l'application
   clearTimeout(saveTimer);
   if (!setCache) return;
-  try { fs.mkdirSync(dataDir(), { recursive: true }); fs.writeFileSync(cacheFile(), JSON.stringify(setCache)); } catch {}
+  try { writeJsonAtomic(cacheFile(), setCache); } catch {}
 }
 const cachedSet = (appid, currency) => loadCache()[appid + ':' + currency] || null;
 
 // maxAge : âge maximal accepté (ms). Infinity = toujours utiliser le cache s'il existe.
 async function getSet(appid, currency, maxAge = Infinity) {
   const hit = cachedSet(appid, currency);
-  if (hit && Date.now() - hit.t <= maxAge) return { set: hit.set, fromCache: true, t: hit.t };
+  const EMPTY_TTL = 12 * 3600e3; // un jeu sans cartes ne doit pas être redemandé à chaque analyse
+  if (hit && Date.now() - hit.t <= maxAge && (hit.set.length || Date.now() - hit.t < EMPTY_TTL)) return { set: hit.set, fromCache: true, t: hit.t };
   const q = `https://steamcommunity.com/market/search/render/?query=&start=0&count=40&search_descriptions=0&sort_column=name&sort_dir=asc&appid=753&norender=1&currency=${currency}` +
     `&category_753_Game%5B%5D=tag_app_${appid}&category_753_cardborder%5B%5D=tag_cardborder_0&category_753_item_class%5B%5D=tag_item_class_2`;
   const d = await jget(q);
@@ -151,7 +153,7 @@ async function getSet(appid, currency, maxAge = Infinity) {
     img: CDN + r.asset_description.icon_url + '/192fx192f',
     game: (r.asset_description.type || '').replace(/ Trading Card$/i, ''),
   }));
-  if (set.length) { loadCache()[appid + ':' + currency] = { t: Date.now(), set }; saveCache(); }
+  loadCache()[appid + ':' + currency] = { t: Date.now(), set }; saveCache();
   return { set, fromCache: false, t: Date.now() };
 }
 

@@ -9,10 +9,11 @@ const state = { client: null, manager: null, community: null, ready: false, need
 function login(env, guardCode) {
   return new Promise((resolve, reject) => {
     if (state.ready) return resolve('ready');
-    if (!env.STEAM_ACCOUNT || !env.STEAM_PASSWORD) return reject(new Error('STEAM_ACCOUNT / STEAM_PASSWORD manquent dans .env'));
+    if (state.client && state.needGuard && state.resolveGuard) return resolve('guard'); // code déjà demandé : on attend
+    if (!env.STEAM_ACCOUNT || !env.STEAM_PASSWORD) return reject(new Error('Renseigne ton nom de compte et ton mot de passe Steam dans ⚙ Réglages (section « Échanges et boosters »).'));
     const client = new SteamUser();
     const community = new SteamCommunity();
-    const manager = new TradeOfferManager({ steam: client, community, language: 'fr' });
+    const manager = new TradeOfferManager({ steam: client, community, language: 'fr', pollInterval: -1 }); // pas de surveillance permanente des offres
     Object.assign(state, { client, community, manager, error: null, needGuard: false });
     const opts = { accountName: env.STEAM_ACCOUNT, password: env.STEAM_PASSWORD };
     if (env.STEAM_SHARED_SECRET) opts.twoFactorCode = SteamTotp.generateAuthCode(env.STEAM_SHARED_SECRET);
@@ -30,9 +31,25 @@ function login(env, guardCode) {
         state.ready = true; state.needGuard = false; clearTimeout(timer); resolve('ready');
       });
     });
-    client.on('error', (e) => { state.error = e.message; clearTimeout(timer); reject(e); });
+    client.on('disconnected', () => { state.ready = false; }); // steam-user se reconnecte seul : 'webSession' remettra ready à true
+    client.on('error', (e) => {
+      state.error = e.message; clearTimeout(timer);
+      Object.assign(state, { client: null, ready: false, needGuard: false, resolveGuard: null }); // permet de réessayer proprement
+      reject(e);
+    });
     client.logOn(opts);
   });
+}
+
+// attend le résultat d'une saisie de code Steam Guard (connecté, nouvelle demande de code, ou erreur)
+async function waitAfterGuard(ms = 15000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < ms) {
+    if (state.ready) return 'ready';
+    if (state.error) throw new Error(state.error);
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  return 'guard';
 }
 
 function submitGuard(code) {
@@ -65,4 +82,4 @@ function openBooster(appid, assetid) {
     state.community.openBoosterPack(appid, String(assetid), (err, items) => (err ? reject(err) : resolve(items.map((i) => ({ name: i.name, img: i.image, foil: !!i.foil })))));
   });
 }
-module.exports = { state, login, submitGuard, sendOffer, openBooster };
+module.exports = { state, login, submitGuard, waitAfterGuard, sendOffer, openBooster };

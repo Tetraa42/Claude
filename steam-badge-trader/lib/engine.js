@@ -5,6 +5,7 @@ const path = require('path');
 const steam = require('./steam');
 const demo = require('./demo');
 const sce = require('./sce');
+const { writeJsonAtomic } = require('./fsutil');
 const { levelFromXp, totalXpForLevel } = require('./levels');
 
 const BOT_DEFAULT = 'https://steamcommunity.com/id/CardExchange';
@@ -38,12 +39,11 @@ const levelsMap = () => new Map((S.profile ? S.profile.badges : []).map((b) => [
 
 // ---------- sauvegarde / chargement ----------
 function saveState() {
-  if (S.demo) return;
+  if (S.demo || !S.profile) return; // rien d'utile à sauvegarder : on ne remplace surtout pas une bonne sauvegarde par un état vide
   try {
     const botMap = {}; for (const [h, v] of S.bot.map) botMap[h] = v.map((x) => x.assetid);
-    fs.mkdirSync(path.dirname(stateFile()), { recursive: true });
-    fs.writeFileSync(stateFile(), JSON.stringify({ v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, sets: S.sets, myCards: S.myCards, boosters: S.boosters,
-      bot: { id: S.bot.id, name: S.bot.name, avatar: S.bot.avatar, apps: S.bot.apps ? [...S.bot.apps] : null, count: S.bot.count, t: S.bot.t, map: botMap }, rank: S.rank.list, rankT: S.rank.t }));
+    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, sets: S.sets, myCards: S.myCards, boosters: S.boosters,
+      bot: { id: S.bot.id, name: S.bot.name, avatar: S.bot.avatar, apps: S.bot.apps ? [...S.bot.apps] : null, count: S.bot.count, t: S.bot.t, map: botMap }, rank: S.rank.list, rankT: S.rank.t });
   } catch {}
 }
 function loadSaved() {
@@ -85,24 +85,29 @@ async function refreshBot(cfg) {
 }
 
 // ---------- analyse principale ----------
-async function run(cfg) {
-  if (S.running) return;
-  const id = ++runId;
-  Object.assign(S, { running: true, error: null, done: 0, total: 0, needFetch: 0, fetched: 0, demo: false, currency: cfg.currency, botOnly: cfg.botOnly });
+async function run(cfg, force = false) {
+  if (S.running && !force) return;
+  const id = ++runId; // une analyse plus récente annule l'ancienne (ex. changement de compte dans les Réglages)
+  const stale = () => id !== runId;
+  Object.assign(S, { running: true, refreshing: false, error: null, done: 0, total: 0, needFetch: 0, fetched: 0, demo: false, currency: cfg.currency, botOnly: cfg.botOnly });
+  let botFull = null;
   try {
     S.phase = 'Lecture de ton profil Steam';
     const sid = await steam.resolveSteamId(cfg.profile, cfg.key);
-    S.profile = await steam.getProfile(cfg.key, sid);
-    S.names = await steam.getOwnedNames(cfg.key, sid);
+    const profile = await steam.getProfile(cfg.key, sid);
+    const names = await steam.getOwnedNames(cfg.key, sid);
+    if (stale()) return;
+    S.profile = profile; S.names = names;
+    S.completed = profile.badges.filter((b) => b.level >= 5).map((b) => ({ appid: b.appid, name: names.get(b.appid) || `Jeu ${b.appid}`, level: b.level, banner: header(b.appid) }));
     saveState();
-    S.completed = S.profile.badges.filter((b) => b.level >= 5).map((b) => ({ appid: b.appid, name: S.names.get(b.appid) || `Jeu ${b.appid}`, level: b.level, banner: header(b.appid) }));
     S.phase = 'Lecture de ton inventaire (cartes et boosters)';
-    const inv = await steam.getInventory(sid);
+    let inv;
+    try { inv = await steam.getInventory(sid); } catch (e) { throw e.code === 'PRIVATE' ? new Error('Ton inventaire Steam est privé : passe-le en Public (Steam > Profil > Confidentialité > Inventaire).') : e; }
+    if (stale()) return;
     S.myCards = inv.cards; S.boosters = inv.boosters;
     saveState();
 
-    let botFull = null;
-    if (cfg.botOnly && !(S.bot.apps && Date.now() - S.bot.t < BOT_TTL)) { S.phase = 'Lecture de l\'inventaire du bot'; botFull = await loadBot(cfg); }
+    if (cfg.botOnly && !(S.bot.apps && Date.now() - S.bot.t < BOT_TTL)) { S.phase = 'Lecture de l\'inventaire du bot'; botFull = await loadBot(cfg); if (stale()) return; }
     const lvl = levelsMap();
     const byApp = groupBy(S.myCards, (c) => c.appid);
     let apps = [...byApp.entries()].filter(([a]) => (lvl.get(a) || 0) < 5);
@@ -114,25 +119,44 @@ async function run(cfg) {
     const seen = new Set();
     let sinceSave = 0;
     for (const [appid, mine] of apps) {
-      if (id !== runId) return;
+      if (stale()) return;
       try {
         const { set, fromCache, t } = await steam.getSet(appid, cfg.currency, Infinity);
+        if (stale()) return;
         if (!fromCache) S.fetched++;
         seen.add(appid);
         if (set.length) upsert(buildSet({ appid, name: S.names.get(appid), lvl: lvl.get(appid) || 0, set, mine, t }));
-      } catch (e) { if (/429/.test(e.message)) throw e; }
+      } catch (e) {
+        if (/429/.test(e.message)) throw e;
+        if (S.sets.some((x) => x.appid === appid)) seen.add(appid); // erreur ponctuelle : on garde ce qu'on avait
+      }
       S.done++;
       if (++sinceSave >= 5) { sinceSave = 0; saveState(); } // rien n'est perdu si on ferme le logiciel en cours d'analyse
     }
-    S.sets = S.sets.filter((s) => seen.has(s.appid));
+    S.sets = S.sets.filter((x) => seen.has(x.appid));
     if (botFull) trimBot(botFull);
     S.updatedAt = Date.now(); S.phase = '';
     saveState();
     S.running = false;
+    if (cfg.onDone) { try { cfg.onDone(); } catch {} }
     refreshPrices(cfg, id).catch(() => {});
     return;
-  } catch (e) { S.error = e.message; S.phase = ''; if (S.sets.length) saveState(); }
+  } catch (e) {
+    if (stale()) return;
+    S.error = e.message; S.phase = '';
+    if (botFull) trimBot(botFull); // on garde les cartes du bot déjà lues même si l'analyse s'arrête
+    saveState();
+  }
   S.running = false;
+}
+
+// Remise à zéro complète (changement de compte) : annule l'analyse en cours.
+function reset() {
+  runId++;
+  Object.assign(S, { demo: false, running: false, refreshing: false, phase: '', done: 0, total: 0, error: null, profile: null, names: new Map(), myCards: [], boosters: [], sets: [], completed: [], updatedAt: 0 });
+  Object.assign(S.bot, { status: 'idle', error: null, id: null, map: new Map(), apps: null, count: 0, t: 0 });
+  Object.assign(S.friends, { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map() });
+  Object.assign(S.rank, { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0 });
 }
 
 // Rafraîchit en arrière-plan les prix devenus trop vieux (le plus intéressant d'abord), sans bloquer l'affichage.
@@ -145,6 +169,7 @@ async function refreshPrices(cfg, id) {
     for (const s of stale) {
       if (id !== runId) break;
       const { set, t } = await steam.getSet(s.appid, cfg.currency, 0);
+      if (id !== runId) break;
       if (set.length) upsert(buildSet({ appid: s.appid, name: s.name, lvl: lvl.get(s.appid) || 0, set, mine: byApp.get(s.appid) || [], t }));
     }
     saveState();
@@ -275,4 +300,4 @@ function spareCards() {
   }
   return out;
 }
-module.exports = { S, run, refreshBot, scanFriends, scanRank, loadDemo, loadSaved, isFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };
+module.exports = { S, run, reset, refreshBot, scanFriends, scanRank, loadDemo, loadSaved, isFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };

@@ -3,6 +3,7 @@
 // ⚠ La structure du site n'a pas pu être vérifiée : la lecture est heuristique, et un diagnostic est gardé pour l'ajuster.
 const fs = require('fs');
 const path = require('path');
+const { writeJsonAtomic } = require('./fsutil');
 
 const dir = () => process.env.BADGE_DATA_DIR;
 const file = () => path.join(dir(), 'sce.json');
@@ -13,7 +14,7 @@ let D = null, bridge = null, saveTimer = null;
 const job = { running: false, done: 0, total: 0, error: null };
 let demoOn = false;
 const load = () => { if (!D) { try { D = JSON.parse(fs.readFileSync(file(), 'utf8')); } catch { D = { balance: null, balanceT: 0, candidates: [], connected: false, games: {}, debug: '' }; } } return D; };
-function flush() { clearTimeout(saveTimer); if (!D || demoOn) return; try { fs.mkdirSync(dir(), { recursive: true }); fs.writeFileSync(file(), JSON.stringify(D)); } catch {} }
+function flush() { clearTimeout(saveTimer); if (!D || demoOn) return; try { writeJsonAtomic(file(), D); } catch {} }
 const save = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 800); };
 const num = (t) => Number(String(t).replace(/\s/g, '').replace(',', '.'));
 

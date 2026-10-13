@@ -28,12 +28,13 @@ const FILTERS = [
   ['done', '🏆 Badges terminés', null],
 ];
 
+const safe = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message, true); } };
 function toast(t, bad) { const e = $('#toast'); e.textContent = t; e.className = 'show' + (bad ? ' bad' : ''); setTimeout(() => (e.className = ''), 4500); }
 async function api(u, o) {
   const r = await fetch(u, o !== undefined ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) } : undefined);
   const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j;
 }
-const setTheme = (t) => { document.documentElement.dataset.theme = t; };
+const setTheme = (t) => { document.documentElement.dataset.theme = t; lsSet('sbt.theme', t); };
 
 async function poll() {
   clearTimeout(timer);
@@ -57,7 +58,7 @@ function renderBasket() {
   const xg = $('#xcount'); if (xg) xg.textContent = `🛒 ${n} carte(s) dans le panier`;
   saveBasket();
 }
-function toggleCards(hashes, on) { for (const h of hashes) (on ? basket.add(h) : basket.delete(h)); renderBasket(); if ($('#xdlg').open && detail) renderDetail(); }
+function toggleCards(hashes, on, rerender = true) { for (const h of hashes) (on ? basket.add(h) : basket.delete(h)); renderBasket(); if (rerender && $('#xdlg').open && detail) renderDetail(); }
 $('#bkclear').onclick = () => { basket.clear(); renderBasket(); if (detail && $('#xdlg').open) renderDetail(); };
 $('#bkgo').onclick = () => openTrade();
 
@@ -185,7 +186,7 @@ function renderDetail() {
   <div class="row xfoot"><span id="xcount"></span><button class="go" style="width:auto;padding:12px 24px;margin:0" data-act="trade">⇄ Lancer l'échange</button></div>`;
   renderBasket();
 }
-$('#xbody').addEventListener('change', (e) => { const h = e.target.dataset && e.target.dataset.h; if (h !== undefined) toggleCards([h], e.target.checked); });
+$('#xbody').addEventListener('change', (e) => { const h = e.target.dataset && e.target.dataset.h; if (h === undefined) return; toggleCards([h], e.target.checked, false); e.target.closest('tr').classList.toggle('sel', e.target.checked); });
 $('#xbody').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]'); if (!b || !detail) return;
   const s = detail.set, missing = s.cards.filter((c) => !c.owned), act = b.dataset.act;
@@ -199,6 +200,7 @@ $('#xbody').addEventListener('click', async (e) => {
 });
 
 // ---------- connexion Steam (échanges, boosters) ----------
+$('#gcode').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#gok').click(); });
 function askGuard() {
   return new Promise((resolve) => {
     $('#gcode').value = ''; $('#gdlg').showModal();
@@ -211,6 +213,7 @@ async function ensureLogin() {
   if (l.status === 'ready') return true;
   const code = await askGuard(); if (!code) return false;
   const r = await api('/api/trade/login', { code });
+  if (r.status !== 'ready') toast('Code Steam Guard refusé ou expiré : réessaie avec le nouveau code.', true);
   return r.status === 'ready';
 }
 
@@ -287,7 +290,9 @@ async function openBooster(appid, assetid, game, btn) {
     $('#bdlg').showModal(); poll();
   } catch (err) { toast(err.message, true); if (btn) btn.disabled = false; }
 }
+let bSig = '', rSig = '';
 function drawBoosters() {
+  const sig = JSON.stringify(st.boosters); if (sig === bSig) return; bSig = sig;
   $('#bgrid').innerHTML = st.boosters.map((b) => `
   <article class="set"><img class="banner" data-detail="${b.appid}" src="${esc(b.banner)}" alt="" onerror="this.remove()"><div class="body"><header><h3 data-detail="${b.appid}">${esc(b.game)}</h3><span class="pill">× ${b.count}</span></header>
     <div class="fan"><img src="${esc(b.img)}" alt="" style="width:96px;height:96px"></div>
@@ -300,8 +305,9 @@ $('#bgrid').addEventListener('click', (e) => {
 });
 
 // ---------- classement ----------
-async function loadGlobal() { try { glob = await api('/api/rank/global'); } catch (e) { glob = { error: e.message, list: [] }; } drawRank(); }
+async function loadGlobal() { try { glob = await api('/api/rank/global'); } catch (e) { glob = { error: e.message, list: [] }; } rSig = ''; drawRank(); }
 function drawRank() {
+  const sig = JSON.stringify([rankTab, $('#rmetric').value, st.rank, glob, st.leaderboard]); if (sig === rSig) return; rSig = sig;
   document.querySelectorAll('#rtabs button').forEach((b) => b.classList.toggle('on', b.dataset.r === rankTab));
   const m = $('#rmetric').value, box = $('#rbody');
   const table = (list) => `<table class="rank"><tr><th></th><th>Joueur</th><th>Niveau</th><th>Badges</th><th>Rareté</th></tr>${[...list].sort((a, b) => (b[m] || 0) - (a[m] || 0)).map((p, i) => `
@@ -311,7 +317,7 @@ function drawRank() {
     const r = st.rank;
     const head = `<div class="row" style="margin-bottom:12px"><span class="mut">${r.status === 'loading' ? `Analyse ${r.done}/${r.total}…` : r.status === 'error' ? '⚠ ' + esc(r.error) : r.list.length ? `${r.list.length} joueurs` : 'Pas encore analysé'}</span><button class="ghost" id="rscan">${r.list.length ? '↻ Réanalyser' : '👥 Analyser mes amis'}</button></div>`;
     box.innerHTML = head + (r.list.length ? table(r.list) : '<div class="sbox">Clique sur « Analyser mes amis » : l\'app lit le niveau et les badges publics de tes amis (leurs badges doivent être visibles).</div>');
-    $('#rscan').onclick = async () => { await api('/api/rank/scan', {}); poll(); };
+    $('#rscan').onclick = safe(async () => { await api('/api/rank/scan', {}); poll(); });
   } else {
     if (!glob) { box.innerHTML = '<p class="empty">Chargement…</p>'; return; }
     if (glob.missing) { box.innerHTML = '<div class="sbox">Le classement entre utilisateurs de l\'app a besoin d\'un serveur. Héberge <code>leaderboard-server</code> (voir son README), puis colle son adresse dans ⚙ Réglages.</div>'; return; }
@@ -321,21 +327,21 @@ function drawRank() {
     if (!joined) $('#rjoin').onclick = async () => { if (!confirm('Ton pseudo, ton avatar, ton niveau et tes badges (publics) seront visibles par les autres utilisateurs. Continuer ?')) return; try { await api('/api/rank/join', {}); toast('Tu es dans le classement !'); await loadGlobal(); poll(); } catch (e) { toast(e.message, true); } };
   }
 }
-$('#rtabs').onclick = (e) => { const b = e.target.closest('button'); if (b) { rankTab = prefs.rankTab = b.dataset.r; savePrefs(); if (rankTab === 'global') loadGlobal(); else drawRank(); } };
-$('#rmetric').onchange = () => { prefs.rankMetric = $('#rmetric').value; savePrefs(); drawRank(); };
+$('#rtabs').onclick = (e) => { const b = e.target.closest('button'); if (b) { rankTab = prefs.rankTab = b.dataset.r; savePrefs(); if (rankTab === 'global') loadGlobal(); else { rSig = ''; drawRank(); } } };
+$('#rmetric').onchange = () => { prefs.rankMetric = $('#rmetric').value; savePrefs(); rSig = ''; drawRank(); };
 
 // ---------- barre d'outils ----------
 $('#chips').onclick = (e) => { const b = e.target.closest('.chip'); if (b) { filter = prefs.filter = b.dataset.f; savePrefs(); lastSig = ''; render(); } };
 $('#q').oninput = () => st && draw(); $('#sort').onchange = () => { prefs.sort = $('#sort').value; savePrefs(); st && draw(); };
-$('#refresh').onclick = async () => { await api('/api/refresh', {}); lastSig = ''; poll(); };
-$('#botref').onclick = async () => { await api('/api/bot/refresh', {}); poll(); };
-$('#frscan').onclick = async () => { await api('/api/friends/scan', {}); toast('Analyse des amis lancée (en arrière-plan)'); poll(); };
-$('#scebtn').onclick = async () => {
+$('#refresh').onclick = safe(async () => { const r = await api('/api/refresh', {}); if (r.already) toast('Une analyse est déjà en cours : elle continue.'); lastSig = ''; poll(); });
+$('#botref').onclick = safe(async () => { await api('/api/bot/refresh', {}); poll(); });
+$('#frscan').onclick = safe(async () => { await api('/api/friends/scan', {}); toast('Analyse des amis lancée (en arrière-plan)'); poll(); });
+$('#scebtn').onclick = safe(async () => {
   const sc = st.credits.sce;
   if (!sc.available) return toast('La connexion à SteamCardExchange fonctionne dans le logiciel installé.', true);
   if (!(sc.connected || st.credits.balance != null)) return openSettings();
   await api('/api/sce/scan', {}); toast('Lecture des crédits lancée (en arrière-plan)'); poll();
-};
+});
 
 // ---------- réglages ----------
 function renderUpdate() {
@@ -361,7 +367,7 @@ $('#sceBal').onclick = async () => { $('#sceInfo').textContent = 'Lecture…'; t
 $('#sceScan').onclick = async () => { try { await api('/api/sce/scan', {}); toast('Lecture des crédits lancée (en arrière-plan)'); poll(); } catch (e) { toast(e.message, true); } };
 $('#sceDbg').onclick = async () => { const t = await (await fetch('/api/sce/debug')).text(); try { await navigator.clipboard.writeText(t); toast('Diagnostic copié : colle-le dans la discussion'); } catch { prompt('Copie ce diagnostic :', t.slice(0, 3000)); } };
 $('#themes').innerHTML = THEMES.map(([k, n, c]) => `<button class="ghost sw" data-t="${k}"><i style="background:${c}"></i>${n}</button>`).join('');
-$('#themes').onclick = async (e) => { const b = e.target.closest('[data-t]'); if (!b) return; setTheme(b.dataset.t); st.theme = b.dataset.t; await api('/api/settings', { THEME: b.dataset.t }); markTheme(); };
+$('#themes').onclick = safe(async (e) => { const b = e.target.closest('[data-t]'); if (!b) return; setTheme(b.dataset.t); st.theme = b.dataset.t; await api('/api/settings', { THEME: b.dataset.t }); markTheme(); });
 const markTheme = () => document.querySelectorAll('.sw').forEach((b) => b.classList.toggle('on', b.dataset.t === document.documentElement.dataset.theme));
 
 async function openSettings() {
