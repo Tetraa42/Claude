@@ -50,3 +50,7 @@ Pour ton vrai compte : copie `.env.example` en `.env`, mets ta clé API Steam (h
 - **✕** dans la barre de recherche pour la vider.
 - **💎 Gemmes** : valeur d'une carte en gemmes, prix du booster de chaque jeu, et fabrication d'un booster (onglet Boosters → « Charger les prix des boosters », ou depuis la fiche d'un jeu). Une confirmation est demandée et la connexion Steam est nécessaire.
 - Prix **achat / revente** de chaque carte chez le bot SteamCardExchange, coût total de tes manquantes en crédits, valeur de tes doublons et prix du badge affiché sur le site.
+- **Bouton « Prêt à échanger »** (rouge → orange → vert) : liste ce qu'il reste à faire (badges, cartes, inventaire du bot, solde, jeux vérifiés chez le bot) avec des boutons pour le lancer ; une fois tout vert, il propose un bouton par jeu complétable (cartes à acheter au bot, prix en crédits, et doublons à revendre pour payer). Chaque bouton ouvre la page du jeu sur SteamCardExchange, où l'échange est confirmé.
+- **⭐ Liste de souhaits** : étoile sur les cartes manquantes ; avertissement quand le bot (ou un ami scanné) a la carte.
+- Les cartes des amis ne sont plus utilisées pour les échanges (seulement pour la liste de souhaits).
+- Page d'un jeu chez le bot : lecture corrigée (blocs « Stock / Worth / Price »).

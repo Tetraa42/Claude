@@ -10,8 +10,9 @@
 <main>
   <div class="status" id="status" hidden><div class="spin"></div><div class="st"><b id="stt"></b></div></div>
   <div id="err" class="errbox" hidden></div>
+  <div class="ready red" id="ready"></div>
   <div class="scans" id="scans"></div>
-  <nav class="views" id="views"><button data-v="sets" class="on">🃏 Sets</button><button data-v="boosters">📦 Boosters <i id="nboost"></i></button><button data-v="rank">🏆 Classement</button><span class="grow"></span><button id="upd" class="pillbtn" hidden>⬇ Mise à jour disponible</button></nav>
+  <nav class="views" id="views"><button data-v="sets" class="on">🃏 Sets</button><button data-v="boosters">📦 Boosters <i id="nboost"></i></button><button data-v="wish">⭐ Souhaits <i id="nwish"></i></button><button data-v="rank">🏆 Classement</button><span class="grow"></span><button id="upd" class="pillbtn" hidden>⬇ Mise à jour disponible</button></nav>
 
   <section id="v-sets">
     <div class="bar"><h2 id="h2">Sets à compléter</h2>
@@ -32,6 +33,11 @@
     <section id="bgrid" class="grid"></section>
   </section>
 
+  <section id="v-wish" hidden>
+    <div class="bar"><h2>Liste de souhaits <small>cartes surveillées chez le bot et chez tes amis</small></h2><div class="tools"><button id="wcheck" class="ghost">↻ Revérifier maintenant</button></div></div>
+    <div id="wbody"></div>
+  </section>
+
   <section id="v-rank" hidden>
     <div class="bar"><h2>Classement</h2><div class="tools">
       <div class="tabs inline" id="rtabs"><button data-r="friends" class="on">👥 Entre amis</button><button data-r="global">🌍 Utilisateurs de l'app</button></div>
@@ -47,7 +53,7 @@
 
 <dialog id="dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form>
   <h3 id="dt">Échange — panier</h3><p class="mut" id="dsub"></p>
-  <div class="tabs" id="tabs"><button data-s="bot">🤖 Bot (site)</button><button data-s="friend" class="on">👥 Ami</button><button data-s="url">🔗 Lien</button></div>
+  <div class="tabs" id="tabs"><button data-s="bot">🤖 Bot (site)</button><button data-s="url" class="on">🔗 Lien</button></div>
   <div id="srcbox"></div>
   <div id="pv" class="pv" hidden><div><h4>Tu reçois <span id="askn"></span></h4><div id="askl" class="mini"></div></div><div class="arrow">⇄</div><div><h4>Tu donnes <span id="givn"></span></h4><div id="givel" class="mini"></div></div></div>
   <p id="note" class="note"></p>

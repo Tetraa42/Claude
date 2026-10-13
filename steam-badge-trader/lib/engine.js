@@ -12,10 +12,10 @@ const BOT_DEFAULT = 'https://steamcommunity.com/id/CardExchange';
 const PRICE_TTL = 6 * 3600e3, BOT_TTL = 30 * 60e3, RANK_TTL = 3600e3;
 const S = {
   running: false, refreshing: false, phase: '', done: 0, total: 0, needFetch: 0, fetched: 0, error: null, profile: null, names: new Map(), myCards: [], boosters: [],
-  sets: [], completed: [], drops: new Map(), updatedAt: 0, demo: false, currency: 3, botOnly: true,
+  sets: [], wishlist: [], completed: [], drops: new Map(), updatedAt: 0, demo: false, currency: 3, botOnly: true,
   bot: { status: 'idle', error: null, name: 'SteamCardExchange', count: 0, games: 0, t: 0 },
   retry: { at: 0, n: 0 }, gems: { gems: 0, sacks: 0 }, invT: 0, catalog: { t: 0, gems: { total: 0, tradable: 0, untradable: 0 }, map: {} }, gemVal: {},
-  tasks: Object.fromEntries(['badges', 'cards', 'boosters', 'gems', 'bot', 'friends', 'balance'].map((k) => [k, { state: 'idle', pct: 0, label: '', eta: null, estSec: 0, timeBased: false, t0: 0, doneAt: 0, error: null }])),
+  tasks: Object.fromEntries(['badges', 'cards', 'boosters', 'gems', 'bot', 'friends', 'balance', 'verify'].map((k) => [k, { state: 'idle', pct: 0, label: '', eta: null, estSec: 0, timeBased: false, t0: 0, doneAt: 0, error: null }])),
   friends: { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map() },
   rank: { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0 },
 };
@@ -53,7 +53,7 @@ const levelsMap = () => new Map((S.profile ? S.profile.badges : []).map((b) => [
 function saveState() {
   if (S.demo || !S.profile) return; // rien d'utile à sauvegarder : on ne remplace surtout pas une bonne sauvegarde par un état vide
   try {
-    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, drops: [...S.drops], sets: S.sets, myCards: S.myCards, boosters: S.boosters, gems: S.gems, catalog: S.catalog, gemVal: S.gemVal, invT: S.invT, taskAt: Object.fromEntries(Object.entries(S.tasks).map(([k, t]) => [k, t.doneAt])),
+    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, drops: [...S.drops], sets: S.sets, myCards: S.myCards, boosters: S.boosters, gems: S.gems, catalog: S.catalog, gemVal: S.gemVal, invT: S.invT, wishlist: S.wishlist, taskAt: Object.fromEntries(Object.entries(S.tasks).map(([k, t]) => [k, t.doneAt])),
       rank: S.rank.list, rankT: S.rank.t });
   } catch {}
 }
@@ -62,7 +62,7 @@ function loadSaved() {
     const d = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
     if (d.v !== 2) return false;
     Object.assign(S, { drops: new Map(d.drops || []), profile: d.profile, completed: d.completed || [], sets: d.sets || [], myCards: d.myCards || [], boosters: d.boosters || [], updatedAt: d.t || 0, currency: d.currency || 3 });
-    S.gems = d.gems || { gems: 0, sacks: 0 }; S.invT = d.invT || 0; if (d.catalog) S.catalog = d.catalog; S.gemVal = d.gemVal || {};
+    S.gems = d.gems || { gems: 0, sacks: 0 }; S.invT = d.invT || 0; if (d.catalog) S.catalog = d.catalog; S.gemVal = d.gemVal || {}; S.wishlist = d.wishlist || [];
     for (const [k, at] of Object.entries(d.taskAt || {})) if (S.tasks[k] && at) Object.assign(S.tasks[k], { state: 'done', pct: 100, doneAt: at }); // « dernier scan : il y a … »
     restoreBot(); // l'inventaire du bot est mémorisé à part (sce.json)
     S.rank.list = d.rank || []; S.rank.t = d.rankT || 0; S.rank.status = S.rank.list.length ? 'ready' : 'idle';
@@ -345,7 +345,7 @@ function cancel(k) {
   if (demoTimers[k]) { clearInterval(demoTimers[k]); delete demoTimers[k]; }
   if (group.includes('cards')) { steam.cancelTask('cards'); steam.cancelTask('inv'); bump('cards'); bump('inv'); S.running = false; invPromise = null; }
   else if (k === 'badges' || k === 'friends') { steam.cancelTask(k); bump(k); }
-  else bump(k); // bot, solde : la lecture déjà lancée se termine mais son résultat est ignoré
+  else bump(k); // bot, solde, vérification : la lecture déjà lancée se termine mais son résultat est ignoré
   for (const g of group) if (running(g)) Object.assign(S.tasks[g], { state: 'idle', pct: 0, eta: null, label: '', error: null, stopped: true });
   if (k === 'friends') S.friends.status = S.friends.inv.size ? 'ready' : 'idle';
   if (k === 'bot') { S.bot.status = sce.hasData() ? 'ready' : 'idle'; restoreBot(); }
@@ -375,9 +375,101 @@ async function checkGameAll(appid, cfg, cpc, only) {
   return d;
 }
 
+// ---------- vérification de tous les jeux candidats (page du jeu chez le bot) ----------
+const VERIFY_TTL = 6 * 3600e3, VERIFY_MAX = 60;
+// Jeux à vérifier : ceux où il manque des cartes ET où le bot a au moins une carte en stock (les moins chers d'abord).
+function verifyCandidates() {
+  return S.sets.filter((s) => !s.provisional && s.missingCount > 0 && (sce.lookup(s.appid, s.name) || {}).stock > 0)
+    .sort((a, b) => (a.missingCount - b.missingCount) || ((a.cost || 0) - (b.cost || 0))).slice(0, VERIFY_MAX);
+}
+const verified = (appid) => sce.hasGame(appid) && sce.gameAge(appid) < VERIFY_TTL;
+async function scanVerify() {
+  if (running('verify')) return;
+  const gen = bump('verify'), list = verifyCandidates().filter((s) => !verified(s.appid));
+  begin('verify', `Vérification des jeux : 0/${list.length}`);
+  if (!list.length) { finish('verify'); return; }
+  let done = 0, failed = 0;
+  for (const s of list) {
+    if (gens.verify !== gen) return;
+    try { if (S.demo) { await steam.sleep(350); sce.demoGame(s.appid, s.cards.map((c) => c.name)); } else await sce.checkGame(s.appid); } catch { failed++; }
+    done++;
+    prog('verify', (100 * done) / list.length, `Vérification des jeux : ${done}/${list.length}`);
+    S.tasks.verify.eta = Math.ceil((list.length - done) * (S.demo ? 0.4 : 5));
+  }
+  if (gens.verify !== gen) return;
+  if (failed === list.length) finish('verify', 'Aucune page de jeu lisible : connecte-toi au site dans les Réglages (section SteamCardExchange).');
+  else { S.tasks.verify.note = failed ? `${failed} page(s) illisible(s)` : null; finish('verify'); saveState(); }
+}
+
+// ---------- bouton « prêt à échanger » : conditions + plan d'échanges ----------
+function readiness() {
+  const T = S.tasks, ok = (k) => T[k].doneAt > 0 && T[k].state !== 'error';
+  const cand = verifyCandidates(), vOk = cand.filter((s) => verified(s.appid)).length;
+  const balanceKnown = sce.status().balance != null;
+  const conds = [
+    { key: 'badges', label: 'Badges lus', ok: ok('badges'), pct: ok('badges') ? 100 : 0 },
+    { key: 'cards', label: 'Cartes & sets scannés', ok: ok('cards') && S.sets.length > 0 && !S.sets.some((s) => s.provisional), pct: ok('cards') ? 100 : T.cards.state === 'running' ? T.cards.pct : 0 },
+    { key: 'bot', label: 'Inventaire du bot lu', ok: sce.hasData(), pct: sce.hasData() ? 100 : 0 },
+    { key: 'balance', label: 'Solde de crédits lu', ok: balanceKnown, pct: balanceKnown ? 100 : 0 },
+    { key: 'verify', label: `Jeux vérifiés chez le bot (${vOk}/${cand.length})`, ok: cand.length > 0 && vOk === cand.length, pct: cand.length ? Math.round((100 * vOk) / cand.length) : (ok('cards') && sce.hasData() ? 100 : 0) },
+  ];
+  // le dernier test (jeux vérifiés) n'a de sens que si les précédents sont remplis
+  const pct = Math.round(conds.reduce((t, c) => t + c.pct, 0) / conds.length);
+  const met = conds.filter((c) => c.ok).length;
+  const level = met === conds.length ? 'green' : met === 0 ? 'red' : 'orange';
+  return { level, pct, conds, plan: met === conds.length ? buildPlan() : [] };
+}
+// Plan : pour chaque jeu dont le bot a TOUTES les cartes manquantes, combien de crédits il faut, et avec quoi les payer
+// (solde d'abord, puis revente de tes doublons au bot). Les jeux les moins chers passent en premier.
+function buildPlan() {
+  let bal = sce.status().balance || 0;
+  const pool = spareCards().map((c) => ({ c, w: (sce.lookup(c.appid, c.game) || {}).worth || 0 })).filter((x) => x.w > 0).sort((a, b) => b.w - a.w);
+  const out = [];
+  const games = S.sets.filter((s) => !s.provisional && s.missingCount > 0 && verified(s.appid)).map((s) => enrichSet(s));
+  const full = games.map((s) => {
+    const miss = s.cards.filter((c) => !c.owned);
+    const buy = miss.map((c) => (c.botCard && c.botCard.stock > 0 && c.botCard.price != null ? { name: c.name, price: c.botCard.price, hash: c.hash, quick: c.botCard.quick !== false } : null));
+    return { s, buy, ok: buy.every(Boolean) };
+  }).filter((x) => x.ok).sort((a, b) => a.buy.reduce((t, c) => t + c.price, 0) - b.buy.reduce((t, c) => t + c.price, 0));
+  for (const { s, buy } of full) {
+    const total = +buy.reduce((t, c) => t + c.price, 0).toFixed(2);
+    let need = Math.max(0, total - bal), sell = [], fund = 0;
+    const used = [];
+    for (const x of pool) { if (need - fund <= 0.0001) break; if (x.c.appid === s.appid && !x.c.tradable) continue; used.push(x); fund += x.w; }
+    const feasible = need - fund <= 0.0001;
+    if (feasible) { for (const x of used) { pool.splice(pool.indexOf(x), 1); sell.push({ name: x.c.name, game: x.c.game, worth: x.w, assetid: x.c.assetid }); } bal = +(bal + fund - total).toFixed(2); }
+    out.push({ appid: s.appid, name: s.name, banner: s.banner, url: sce.gameUrl(s.appid), buy, total, sell, feasible, short: feasible ? 0 : +(need - fund).toFixed(2), missing: buy.length });
+  }
+  return out;
+}
+
+// ---------- liste de souhaits : cartes surveillées chez le bot et chez les amis ----------
+function wishAdd(hash) {
+  if (S.wishlist.some((w) => w.hash === hash)) return;
+  const set = S.sets.find((s) => s.cards.some((c) => c.hash === hash)); const c = set && set.cards.find((x) => x.hash === hash);
+  if (!c) throw new Error('Carte inconnue : scanne d\'abord tes cartes.');
+  S.wishlist.push({ hash, name: c.name, img: c.img, appid: set.appid, game: set.name, t: Date.now() }); saveState();
+}
+const wishRemove = (hash) => { S.wishlist = S.wishlist.filter((w) => w.hash !== hash); saveState(); };
+function wishState() {
+  return S.wishlist.map((w) => {
+    const bc = sce.cardInfo(w.appid, w.name), set = S.sets.find((s) => s.appid === w.appid), mine = set ? (set.cards.find((c) => c.hash === w.hash) || {}).owned : 0;
+    const friends = S.friends.list.filter((f) => (S.friends.inv.get(f.steamid) || new Map()).has(w.hash)).map((f) => ({ name: f.name, avatar: f.avatar, steamid: f.steamid }));
+    return { ...w, owned: mine || 0, bot: bc ? { stock: bc.stock, price: bc.price } : null, botChecked: !!bc, friends, available: !!(bc && bc.stock > 0) || friends.length > 0, url: sce.gameUrl(w.appid) };
+  });
+}
+// Vérifie les cartes souhaitées (page du jeu chez le bot, au plus une fois par heure et par jeu)
+async function checkWishes() {
+  for (const appid of new Set(S.wishlist.map((w) => w.appid))) {
+    if (sce.gameAge(appid) < 3600e3) continue;
+    try { if (S.demo) sce.demoGame(appid, (S.sets.find((s) => s.appid === appid) || { cards: [] }).cards.map((c) => c.name)); else await sce.checkGame(appid); } catch { /* prochain tour */ }
+  }
+}
+
 function loadDemo() {
   Object.assign(S, { demo: true, running: false, error: null }, demo.demoState()); demo.demoCredits(sce);
   S.gems = { gems: 4250, sacks: 2 }; demoCatalog();
+  S.wishlist = [];
   for (const k of ['badges', 'cards', 'boosters', 'gems', 'bot', 'balance']) Object.assign(S.tasks[k], { state: 'done', pct: 100, doneAt: Date.now() - (k.length * 4 + 3) * 60e3, error: null });
 }
 
@@ -435,6 +527,7 @@ function snapshot(opt = {}) {
     bot: { status: B.status, error: B.error, name: B.name, count: B.count, games: B.games, botOnly: S.botOnly },
     friends: { status: F.status, error: F.error, done: F.done, total: F.total, count: F.list.length },
     rank: { status: S.rank.status, error: S.rank.error, done: S.rank.done, total: S.rank.total, list: S.rank.list },
+    ready: readiness(), wishlist: wishState(),
     projection: p && { gainXp: gain, level: levelFromXp(p.xp + gain).level, nextLevelXp: totalXpForLevel(p.level + 1) - p.xp },
     credits: { balance: scest.balance != null ? scest.balance : manual, perCard: cpc || null, sce: scest, ownedValue, spareValue },
   };
@@ -476,4 +569,4 @@ function spareCards() {
   }
   return out;
 }
-module.exports = { S, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };
+module.exports = { S, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };

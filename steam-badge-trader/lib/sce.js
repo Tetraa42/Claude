@@ -157,12 +157,34 @@ function parseGameRows(rows, head) {
   }
   return out;
 }
+// La page d'un jeu n'est pas un tableau : chaque carte est un bloc de lignes
+//   NOM / Stock: 1 (Last Card) / Worth (You Get): 6c / Price (You Pay): 9c (ou « - ») / Quick-Trade | Not available
+function parseGameText(text) {
+  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const out = {}, val = (l) => { const m = /(\d+(?:[.,]\d+)?)\s*c\b/i.exec(l); return m ? num(m[1]) : null; };
+  for (let i = 1; i < lines.length; i++) {
+    const m = /^stock\s*:\s*(\d+)/i.exec(lines[i]);
+    if (!m) continue;
+    const name = lines[i - 1];
+    let worth = null, price = null, quick = false;
+    for (let j = i + 1; j < Math.min(lines.length, i + 6) && !/^stock\s*:/i.test(lines[j]); j++) {
+      if (/^worth/i.test(lines[j])) worth = val(lines[j]);
+      else if (/^price/i.test(lines[j])) price = val(lines[j]);
+      else if (/quick-?trade/i.test(lines[j])) quick = true;
+    }
+    if (!name || /^(worth|price|stock)/i.test(name)) continue;
+    out[norm(name)] = { stock: Number(m[1]), price, worth, quick, last: /last card/i.test(lines[i]), name };
+  }
+  return out;
+}
 async function checkGame(appid) {
   if (!bridge) throw new Error(NO_SITE);
   const d = load();
   const r = await bridge.scrape(`${HOME}index.php?inventorygame-appid-${appid}`, { table: true });
   const rows = r.rows || [], head = r.head || [];
-  const cards = parseGameRows(rows, head);
+  let cards = parseGameRows(rows, head);
+  const fromText = parseGameText(r.text); // le site actuel affiche des blocs de texte, pas un tableau
+  if (Object.keys(fromText).length >= Object.keys(cards).length) cards = fromText;
   d.games = d.games || {};
   d.games[appid] = { t: Date.now(), cards };
   d.debug = `PAGE JEU ${appid}\nEN-TÊTES: ${JSON.stringify(head)}\nLIGNES: ${rows.length}\nEXEMPLES: ${JSON.stringify(rows.slice(0, 3))}\nRÉSULTAT: ${JSON.stringify(cards).slice(0, 800)}\n\n--- TEXTE\n${String(r.text || '').slice(0, 1500)}`;
@@ -172,11 +194,18 @@ async function checkGame(appid) {
 }
 const demoGame = (appid, names) => { D.games = D.games || {}; D.games[appid] = { t: Date.now(), cards: Object.fromEntries(names.map((n, i) => [norm(n), { stock: i % 3, price: 7 + (i % 4), worth: 3 }])) }; };
 const gameData = (appid) => (load().games || {})[appid] || null;
+const gameUrl = (appid) => `${HOME}index.php?inventorygame-appid-${appid}`;
+const gameAge = (appid) => { const g = gameData(appid); return g ? Date.now() - g.t : Infinity; };
 const hasGame = (appid) => { const g = gameData(appid); return !!g && Object.keys(g.cards).length > 0; };
-const cardInfo = (appid, name) => { const g = gameData(appid); return g ? g.cards[norm(name)] || null : null; };
+const cardInfo = (appid, name) => {
+  const g = gameData(appid); if (!g) return null;
+  const k = norm(name); if (g.cards[k]) return g.cards[k];
+  const hit = Object.keys(g.cards).find((x) => x.length > 3 && k.length > 3 && (x.endsWith(k) || k.endsWith(x))); // ex. « Gal DONALD MORDEN » (préfixe ajouté par le site)
+  return hit ? g.cards[hit] : null;
+};
 
 const status = () => { const d = load(); return { available: !!bridge || demoOn, connected: d.connected, balance: d.balance, balanceT: d.balanceT, candidates: d.candidates,
   games: index().stocked, invAge: d.inv ? d.inv.t : 0, hasDebug: !!d.debug }; };
 const debug = () => load().debug || '';
 const reset = () => { if (demoOn) { demoOn = false; D = null; } };
-module.exports = { setBridge, login, refreshBalance, readInventory, readBadgePrices, badgePrice, checkGame, demoGame, hasGame, cardInfo, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };
+module.exports = { setBridge, login, refreshBalance, readInventory, readBadgePrices, badgePrice, checkGame, parseGameText, gameUrl, gameAge, demoGame, hasGame, cardInfo, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };

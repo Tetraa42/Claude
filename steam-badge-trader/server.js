@@ -51,6 +51,7 @@ app.get('/art/banner/:appid.svg', (req, res) => res.type('svg').send(demo.svgBan
 app.get('/art/:appid/:i.svg', (req, res) => res.type('svg').set('Cache-Control', 'public,max-age=86400').send(demo.svgCard(req.params.appid, Number(req.params.i))));
 
 let started = false;
+setInterval(() => { if (S.wishlist.length) engine.checkWishes().catch(() => {}); }, 30 * 60e3).unref(); // liste de souhaits : revérifiée toutes les 30 min
 function ensureStarted() {
   if (started) return;
   started = true;
@@ -77,11 +78,14 @@ app.post('/api/refresh', (_, res) => { // « Tout actualiser » : badges puis ca
 app.post('/api/scan/:task', (req, res) => {
   const k = req.params.task, c = cfg();
   const fn = { badges: () => engine.scanBadges(c), cards: () => engine.scanCards(c), boosters: () => engine.scanBoosters(c), gems: () => engine.scanGems(c),
-    bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance() }[k];
+    bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance(), verify: () => engine.scanVerify() }[k];
   if (!fn) return res.status(400).json({ error: 'Scan inconnu' });
-  if (isDemo()) engine.demoScan(k); else Promise.resolve(fn()).catch((e) => { S.error = e.message; });
+  if (isDemo() && k !== 'verify') engine.demoScan(k); else Promise.resolve(fn()).catch((e) => { S.error = e.message; });
   res.json({ ok: true });
 });
+app.post('/api/wish/add', (req, res) => { try { engine.wishAdd(String(req.body.hash)); engine.checkWishes().catch(() => {}); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/wish/remove', (req, res) => { engine.wishRemove(String(req.body.hash)); res.json({ ok: true }); });
+app.post('/api/wish/check', async (_, res) => { await engine.checkWishes(); res.json({ ok: true }); });
 app.post('/api/scan/:task/cancel', (req, res) => { engine.cancel(req.params.task); res.json({ ok: true }); });
 app.post('/api/game/:appid/check', async (req, res) => { // vérification manuelle d'un jeu : stock du bot carte par carte + prix
   try { res.json(await engine.checkGameAll(Number(req.params.appid), cfg(), Number(env.CREDITS_PER_CARD) || 0, req.body && req.body.only)); }
