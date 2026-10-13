@@ -72,3 +72,5 @@ table.cards{width:100%;border-collapse:collapse;font-size:14px}.cards th{color:v
 .set .banner,.set h3{cursor:pointer}.set h3:hover{color:var(--ac)}
 .mini img{cursor:pointer;border:2px solid transparent}.mini img.off{opacity:.28;filter:grayscale(1)}.mini img.on{border-color:var(--ok)}
 .bbox{display:flex;gap:14px;align-items:center;background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:12px}.bbox img{width:64px;height:64px;border-radius:10px}
+.fan .ph{flex:0 1 76px;min-width:0;aspect-ratio:1;border-radius:10px;margin-left:-8px;border:2px dashed var(--line);background:var(--bg2);display:block}
+.price small{font-size:13px;font-weight:400}

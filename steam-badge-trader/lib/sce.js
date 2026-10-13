@@ -22,7 +22,7 @@ const setBridge = (b) => { bridge = b; };
 const NO_SITE = 'Connexion SteamCardExchange disponible uniquement dans le logiciel installé.';
 
 // ---- « 15 credits », « Credits: 15 », « Credits\n15 » : on ignore les phrases de règles (maximum, limite…) ----
-const RULE = /maximum|up to|limit|store|more than|per card|decline/i;
+const RULE = /maximum|up to|limit|store|more than|per card|decline|donat|purchase|before trade|after trade|worth|offer/i; // règlement, dons, historique des échanges…
 function findCredits(text) {
   const out = [], seen = new Set();
   const re = /(\d+(?:[.,]\d+)?)\s*(?:credits?|crédits?)\b|(?:credits?|crédits?)\s*[:=\-]?\s*\n?\s*(\d+(?:[.,]\d+)?)/gi;
@@ -46,7 +46,7 @@ async function refreshBalance() {
   d.connected = (home.links || []).some((l) => OUT.test(l.t) || OUT.test(l.h)); // le lien « Logout » n'existe que connecté
   const prof = await bridge.scrape(PROFILE_URL); // la page Profile affiche le solde
   d.candidates = findCredits(prof.text).slice(0, 8);
-  const pick = d.candidates.find((c) => /your|my\b|balance|credits?\s*[:=]/i.test(c.ctx)) || d.candidates[0];
+  const pick = d.candidates.find((c) => /\d\s*credits/i.test(c.ctx)) || d.candidates[0]; // « 15 CREDITS » affiché sous ton pseudo
   if (pick) { d.balance = pick.value; d.balanceT = Date.now(); d.connected = true; }
   d.debug = `CONNECTÉ: ${d.connected}\n\n--- PAGE PROFILE (début)\n${prof.text.slice(0, 3500)}\n\nVALEURS TROUVÉES: ${JSON.stringify(d.candidates)}`;
   save();

@@ -21,7 +21,7 @@ const FILTERS = [
   ['new', '🆕 Nouveaux badges', (s) => s.badgeLevel === 0],
   ['progress', '📈 Badges en cours', (s) => s.badgeLevel > 0],
   ['dupes', '♻ Avec doublons', (s) => s.dupes > 0],
-  ['cheap', '💶 < 0,50 €', (s) => s.cost > 0 && s.cost < 0.5],
+  ['cheap', '💶 < 0,50 €', (s) => s.cost != null && s.cost > 0 && s.cost < 0.5],
   ['bot', '🤖 En stock chez le bot', (s) => s.botStock > 0],
   ['botfull', '🤖 Set complet dispo', (s) => s.botSets > 0],
   ['friends', '👥 Chez des amis', (s) => s.friends.length > 0],
@@ -46,7 +46,7 @@ async function poll() {
 // ---------- panier ----------
 function cardIndex() { // cartes manquantes de tous les jeux, par hash
   const m = new Map();
-  for (const s of st.sets) for (const c of s.cards) if (!c.owned) m.set(c.hash, { ...c, appid: s.appid, game: s.name, friends: s.friends.filter((f) => f.have.includes(c.hash)) });
+  for (const s of st.sets) for (const c of s.cards) if (!c.owned && !c.unknown) m.set(c.hash, { ...c, appid: s.appid, game: s.name, friends: s.friends.filter((f) => f.have.includes(c.hash)) });
   return m;
 }
 function renderBasket() {
@@ -71,13 +71,13 @@ function render() {
     $('#lvl').textContent = p.level; $('#ring').style.strokeDashoffset = 327 * (1 - p.intoLevel / p.needed);
     $('#proj').textContent = st.projection.level; $('#gain').textContent = '+' + st.projection.gainXp;
   } else $('#name').textContent = 'Lecture de ton profil Steam…';
-  $('#tot').textContent = money(st.sets.reduce((t, s) => t + s.cost, 0));
+  $('#tot').textContent = money(st.sets.reduce((t, s) => t + (s.cost || 0), 0));
   $('#kcred').hidden = st.credits.balance == null; if (st.credits.balance != null) $('#cred').textContent = nf(st.credits.balance);
   $('#kcval').hidden = st.credits.ownedValue == null; if (st.credits.ownedValue != null) $('#cval').textContent = nf(st.credits.ownedValue);
 
   $('#status').hidden = !(g.running || g.refreshing);
   if (g.running || g.refreshing) {
-    $('#stt').textContent = g.wait ? `Steam demande de ralentir : reprise dans ${g.wait} s (rien n'est perdu)…`
+    $('#stt').textContent = g.wait ? `Steam demande de ralentir : reprise dans ${g.wait} s (rien n'est perdu)…${st.sets.length ? '' : ' Steam a limité ton adresse suite aux essais précédents : ça se débloque tout seul, souvent en moins d\'une heure.'}`
       : g.running ? `${g.phase}${g.total ? ` — ${g.done}/${g.total} jeux` : ''}` : 'Mise à jour des prix en arrière-plan…';
     $('#stbar').style.width = (g.running ? (g.total ? (100 * g.done) / g.total : 5) : 100) + '%';
     $('#sts').textContent = g.running && g.total ? (g.fetchLeft ? `${g.fetchLeft} jeu(x) à récupérer chez Steam (~${g.etaMin} min) — les autres viennent de la mémoire (sauvegardée au fur et à mesure)` : 'Tout vient de la mémoire : instantané') : '';
@@ -114,7 +114,7 @@ $('#views').onclick = (e) => {
 // ---------- sets ----------
 function draw() {
   const q = $('#q').value.toLowerCase(), sort = $('#sort').value;
-  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botStock, s.friends.length, s.cost, s.worth]), st.completed.length, st.progress.running]);
+  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botStock, s.friends.length, s.cost, s.worth, s.provisional]), st.completed.length, st.progress.running]);
   if (sig === lastSig) return; lastSig = sig;
   if (filter === 'done') {
     $('#h2').innerHTML = 'Badges terminés <small>niveau 5 — 100 % · clique pour voir le détail</small>';
@@ -125,23 +125,25 @@ function draw() {
   }
   $('#h2').innerHTML = 'Sets à compléter <small>' + { cost: 'du moins cher au plus cher', missing: 'les plus proches de 100 %', pct: 'les plus avancés', name: 'par nom' }[sort] + ' · clique sur un jeu pour le détail</small>';
   const fn = FILTERS.find((f) => f[0] === filter)[2];
-  const by = { cost: (a, b) => a.cost - b.cost, missing: (a, b) => a.missingCount - b.missingCount || a.cost - b.cost, pct: (a, b) => b.ownedUnique / b.total - a.ownedUnique / a.total, name: (a, b) => a.name.localeCompare(b.name) }[sort];
+  const cc = (x) => (x.cost == null ? 1e9 : x.cost); // prix pas encore connu : en fin de liste
+  const by = { cost: (a, b) => cc(a) - cc(b), missing: (a, b) => a.missingCount - b.missingCount || cc(a) - cc(b), pct: (a, b) => b.ownedUnique / b.total - a.ownedUnique / a.total, name: (a, b) => a.name.localeCompare(b.name) }[sort];
   const list = st.sets.filter((s) => fn(s) && s.name.toLowerCase().includes(q)).sort(by);
   $('#grid').innerHTML = list.map((s) => `
   <article class="set"><img class="banner" data-detail="${s.appid}" src="${esc(s.banner)}" alt="" loading="lazy" onerror="this.remove()">
    <div class="body"><header><h3 data-detail="${s.appid}">${esc(s.name)}</h3><span class="pill">${s.badgeLevel ? 'Niv. ' + s.badgeLevel + ' → ' + (s.badgeLevel + 1) : 'Nouveau badge'}</span></header>
-    <div class="fan">${s.cards.map((c) => `<img loading="lazy" src="${esc(c.img)}" title="${esc(c.name)} — ${esc(c.priceText || '')}${c.credits != null ? ' · ' + c.credits + ' crédit(s) chez le bot' : ''}" class="${c.owned ? '' : 'miss'}" alt="${esc(c.name)}">`).join('')}</div>
+    <div class="fan">${s.cards.map((c) => c.unknown ? '<span class="ph" title="Carte pas encore connue"></span>' : `<img loading="lazy" src="${esc(c.img)}" title="${esc(c.name)} — ${esc(c.priceText || '')}${c.credits != null ? ' · ' + c.credits + ' crédit(s) chez le bot' : ''}" class="${c.owned ? '' : 'miss'}" alt="${esc(c.name)}">`).join('')}</div>
     <div class="meter"><i style="width:${(100 * s.ownedUnique) / s.total}%"></i></div>
     <div class="row"><span>${s.ownedUnique}/${s.total} cartes · ${s.dupes} doublon(s)</span><span>+100 XP</span></div>
     <div class="tags">${s.botStock ? `<span class="tag bot" title="Cartes en stock chez le bot SteamCardExchange">🤖 stock ${s.botStock} · ${s.botDistinct}/${s.total} différentes${s.botSets ? ' · ' + s.botSets + ' set(s) complet(s)' : ''}</span>` : ''}${s.friends.length ? `<span class="tag fr">👥 ${s.friends.length} ami(s)</span>` : ''}${s.worth != null ? `<span class="tag cr" title="Crédits que le bot te donne pour une carte de ce jeu">💳 ${s.worth} crédit(s)/carte</span>` : ''}</div>
-    <div class="row"><span class="price ${s.cost ? '' : 'free'}">${s.cost ? money(s.cost) : 'Prêt à crafter !'}${s.stale ? ' <small title="prix en cours de rafraîchissement">~</small>' : ''}</span><a class="lnk" href="${esc(s.link)}" target="_blank" rel="noopener">Comparer sur SCE ↗</a></div>
-    <button class="cta" data-app="${s.appid}">${s.cost ? '⇄ Compléter par échange' : '🔨 Crafter le badge (Steam)'}</button></div>
+    <div class="row"><span class="price ${s.cost === 0 ? 'free' : ''}">${s.cost == null ? '<small class="mut">prix en cours de lecture…</small>' : s.cost ? money(s.cost) : 'Prêt à crafter !'}${s.stale && !s.provisional ? ' <small title="prix en cours de rafraîchissement">~</small>' : ''}</span><a class="lnk" href="${esc(s.link)}" target="_blank" rel="noopener">Comparer sur SCE ↗</a></div>
+    <button class="cta" data-app="${s.appid}">${s.cost == null ? '🔎 Voir le détail' : s.cost ? '⇄ Compléter par échange' : '🔨 Crafter le badge (Steam)'}</button></div>
   </article>`).join('') || `<p class="empty">${st.progress.running ? 'Analyse en cours, les sets apparaissent ici au fur et à mesure…' : 'Aucun set ne correspond à ce filtre.'}</p>`;
 }
 $('#grid').addEventListener('click', (e) => {
   const d = e.target.closest('[data-detail]'); if (d) return openDetail(Number(d.dataset.detail));
   const b = e.target.closest('.cta'); if (!b) return;
   const s = st.sets.find((x) => x.appid == b.dataset.app);
+  if (s.cost == null) return openDetail(s.appid); // prix pas encore lu : la fiche le récupère
   if (!s.cost) return window.open(`${st.profile.url.replace(/\/$/, '')}/gamecards/${s.appid}/`, '_blank');
   toggleCards(s.cards.filter((c) => !c.owned).map((c) => c.hash), true); openTrade(); // « compléter » = tout le set manquant dans le panier
 });

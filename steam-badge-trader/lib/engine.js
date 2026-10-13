@@ -35,6 +35,16 @@ function buildSet({ appid, name, lvl, set, mine, t }) {
     banner: header(appid), link: `https://www.steamcardexchange.net/index.php?gamepage-appid-${appid}`,
   };
 }
+// Set provisoire : affiché tout de suite à partir de TON inventaire et du tableau du bot, avant que le marché Steam n'ait répondu (prix et cartes manquantes pas encore connus).
+function provisionalSet({ appid, name, lvl, mine, bi }) {
+  const owned = groupBy(mine, (c) => c.hash);
+  const total = Math.max(bi ? bi.cardsInSet : 0, owned.size);
+  const cards = [...owned.entries()].map(([hash, list]) => ({ hash, name: list[0].name, price: 0, priceText: '', listings: 0, img: list[0].img, game: list[0].game, owned: list.length, assetids: list.map((c) => c.assetid) }));
+  for (let i = cards.length; i < total; i++) cards.push({ hash: `?${appid}-${i}`, name: 'Carte pas encore connue', price: 0, priceText: '', listings: 0, img: '', owned: 0, assetids: [], unknown: true });
+  const missing = total - owned.size;
+  return { appid, name: name || (mine[0] && mine[0].game) || `App ${appid}`, badgeLevel: lvl, total, ownedUnique: owned.size, missingCount: missing, cost: missing === 0 ? 0 : null,
+    dupes: [...owned.values()].reduce((t, l) => t + Math.max(0, l.length - 1), 0), cards, priceT: 0, provisional: true, banner: header(appid), link: `https://www.steamcardexchange.net/index.php?gamepage-appid-${appid}` };
+}
 const upsert = (set) => { const i = S.sets.findIndex((s) => s.appid === set.appid); if (i >= 0) S.sets[i] = set; else S.sets.push(set); };
 const levelsMap = () => new Map((S.profile ? S.profile.badges : []).map((b) => [b.appid, b.level]));
 
@@ -108,6 +118,9 @@ async function run(cfg, force = false) {
     apps.sort((a, b) => b[1].length - a[1].length); // les plus avancés d'abord
     S.total = apps.length;
     S.needFetch = apps.filter(([a]) => !steam.cachedSet(a, cfg.currency)).length;
+    for (const [appid, mine] of apps) { // tes jeux apparaissent tout de suite, les prix arrivent ensuite jeu après jeu
+      if (!S.sets.some((x) => x.appid === appid) && !steam.cachedSet(appid, cfg.currency)) upsert(provisionalSet({ appid, name: S.names.get(appid), lvl: lvl.get(appid) || 0, mine, bi: sce.lookup(appid, mine[0].game) }));
+    }
     S.phase = 'Analyse des sets et des prix';
     const seen = new Set();
     let sinceSave = 0;
@@ -250,8 +263,8 @@ function snapshot(opt = {}) {
   const manual = opt.creditsBalance === '' || opt.creditsBalance == null ? null : Number(opt.creditsBalance);
   const scest = sce.status(), hasInv = sce.hasData();
   const valueOf = (cards) => +cards.reduce((t, c) => t + ((sce.lookup(c.appid, c.game) || {}).worth || 0), 0).toFixed(2);
-  const ownedValue = hasInv ? valueOf(S.myCards) : null;        // ce que le bot te donnerait pour toutes tes cartes
-  const spareValue = hasInv ? valueOf(spareCards()) : null;      // … pour tes seules cartes en trop
+  const ownedValue = hasInv && S.myCards.length ? valueOf(S.myCards) : null;        // ce que le bot te donnerait pour toutes tes cartes
+  const spareValue = hasInv && S.myCards.length ? valueOf(spareCards()) : null;      // … pour tes seules cartes en trop
   return {
     demo: S.demo, currency: S.currency, profile: p, sets, completed: S.completed, boosters, updatedAt: S.updatedAt,
     progress: { running: S.running, refreshing: S.refreshing, phase: S.phase, done: S.done, total: S.total, fetchLeft, etaMin: Math.ceil((fetchLeft * 3.1) / 60),
@@ -268,10 +281,12 @@ function snapshot(opt = {}) {
 async function gameDetail(appid, cfg, cpc) {
   const lvl = levelsMap();
   let set = S.sets.find((s) => s.appid === appid);
-  if (!set) {
+  const wasListed = !!set;
+  if (!set || set.provisional) {
     const { set: cards, t } = await steam.getSet(appid, cfg.currency, Infinity);
     if (!cards.length) throw new Error('Aucune carte trouvée pour ce jeu');
     set = buildSet({ appid, name: S.names.get(appid) || cards[0].game, lvl: lvl.get(appid) || 0, set: cards, mine: S.myCards.filter((c) => c.appid === appid), t });
+    if (wasListed) upsert(set);
   }
   const badge = S.profile && S.profile.badges.find((b) => b.appid === appid);
   const boosters = S.boosters.filter((b) => b.appid === appid);
@@ -283,7 +298,7 @@ async function gameDetail(appid, cfg, cpc) {
 // Cartes manquantes (tous jeux confondus) retrouvées par leur hash, pour le panier d'échange.
 function missingByHash() {
   const m = new Map();
-  for (const s of S.sets) for (const c of s.cards) if (!c.owned) m.set(c.hash, { ...c, appid: s.appid, game: s.name });
+  for (const s of S.sets) for (const c of s.cards) if (!c.owned && !c.unknown) m.set(c.hash, { ...c, appid: s.appid, game: s.name });
   return m;
 }
 function flush() { saveState(); steam.flushCache(); sce.flush(); }
