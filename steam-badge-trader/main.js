@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu } = require('electron');
+const { app, BrowserWindow, shell, Menu, dialog } = require('electron');
 const path = require('path');
 
 process.env.BADGE_DATA_DIR = path.join(app.getPath('userData'), 'data'); // survit aux mises à jour du logiciel
@@ -64,7 +64,7 @@ async function createWindow() {
   const server = serverMod = require('./server');
   server.setSce(sceBridge);
   if (updater) server.setUpdater(updater); else server.setUpdater({ status: () => ({ ...u, status: 'dev' }), check: async () => { throw new Error('Mises à jour disponibles uniquement dans le logiciel installé.'); }, install() {} });
-  const port = await server.start(38217).catch(() => server.start(0)); // port fixe : les préférences du navigateur intégré sont conservées
+  const port = await server.start(38217); // port fixe si possible (préférences conservées), sinon un port libre
   win = new BrowserWindow({ width: 1320, height: 900, minWidth: 900, minHeight: 600, backgroundColor: '#0b1220',
     title: 'Steam Badge Trader', icon: path.join(__dirname, 'build', 'icon.png'), autoHideMenuBar: true });
   win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
@@ -72,5 +72,6 @@ async function createWindow() {
   if (autoUpdater) setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 8000); // simple vérification discrète au démarrage
 }
 app.on('second-instance', () => { if (win) { if (win.isMinimized()) win.restore(); win.focus(); } });
-if (gotLock) app.whenReady().then(() => { Menu.setApplicationMenu(null); createWindow(); });
-app.on('window-all-closed', () => app.quit());
+if (gotLock) app.whenReady().then(() => { Menu.setApplicationMenu(null); return createWindow(); }).catch((e) => { dialog.showErrorBox('Steam Badge Trader', 'Démarrage impossible : ' + e.message); app.quit(); });
+app.on('will-quit', () => { try { if (serverMod) serverMod.stop(); } catch {} });
+app.on('window-all-closed', () => { app.quit(); setTimeout(() => process.exit(0), 4000).unref(); }); // garantit que le processus se termine vraiment

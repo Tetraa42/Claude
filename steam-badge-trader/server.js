@@ -205,11 +205,21 @@ app.post('/api/settings', (req, res) => {
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-function start(port) {
+// Démarrage robuste : si le port est encore occupé (ancienne fenêtre qui se ferme), on réessaie un peu puis on prend un port libre.
+let httpServer = null;
+function listenOnce(port) {
   return new Promise((resolve, reject) => {
-    const srv = app.listen(port, '127.0.0.1', () => resolve(srv.address().port));
-    srv.on('error', reject);
+    const srv = require('http').createServer(app);
+    srv.once('error', reject);
+    srv.listen(port, '127.0.0.1', () => { srv.removeListener('error', reject); httpServer = srv; resolve(srv.address().port); });
   });
 }
-module.exports = { start, setUpdater, setSce, flush: () => engine.flush() };
+async function start(port) {
+  for (let i = 0; i < 4 && port; i++) {
+    try { return await listenOnce(port); } catch (e) { if (e.code !== 'EADDRINUSE') throw e; await new Promise((r) => setTimeout(r, 800)); }
+  }
+  return listenOnce(0);
+}
+const stop = () => { try { if (httpServer) httpServer.close(); } catch {} };
+module.exports = { start, stop, setUpdater, setSce, flush: () => engine.flush() };
 if (require.main === module) start(Number(env.PORT || 3000)).then((p) => console.log(`Steam Badge Trader → http://localhost:${p} ${isDemo() ? '(MODE DÉMO)' : ''}`));
