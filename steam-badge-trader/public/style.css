@@ -61,3 +61,14 @@ table.rank{width:100%;border-collapse:collapse}.rank th{color:var(--mut);font-si
 .sbox{background:var(--bg2);border:1px dashed var(--line);border-radius:14px;padding:18px;color:var(--mut)}
 @media(max-width:700px){.hero{padding:18px 14px}}
 .tag.cr{background:#fbbf2422;color:var(--warn)}
+
+/* ---- fiche badge, panier ---- */
+.wide-dlg{width:min(980px,96vw)}
+#basket{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;display:flex;gap:10px;align-items:center;background:var(--card);border:1px solid var(--ac);border-radius:16px;padding:10px 14px;box-shadow:0 12px 40px #000a;min-width:min(560px,92vw)}#basket[hidden]{display:none}
+.xhead{position:relative;margin:-24px -24px 14px;border-radius:20px 20px 0 0;overflow:hidden;min-height:96px;background:linear-gradient(135deg,var(--ac),var(--ac2))}.xhead img{width:100%;max-height:170px;object-fit:cover;display:block}.xhead h2{position:absolute;left:20px;bottom:12px;margin:0;color:#fff;text-shadow:0 2px 12px #000c;font-size:26px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:12px 0}.stat{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}.stat b{display:block;font-size:20px}.stat small{color:var(--mut)}
+table.cards{width:100%;border-collapse:collapse;font-size:14px}.cards th{color:var(--mut);font-size:12px;text-align:left;padding:6px 8px}.cards td{padding:6px 8px;border-top:1px solid var(--line);vertical-align:middle}.cards img{width:44px;height:44px;border-radius:8px;vertical-align:middle;margin-right:8px}.cards tr.miss td:nth-child(2){font-weight:600}.cards tr.sel{background:#ffffff0d}
+.xsec{margin:16px 0 6px}.xsec h4{margin:0 0 8px}.flist{display:flex;flex-direction:column;gap:6px}.frow{display:flex;gap:10px;align-items:center;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:8px 12px}.frow img{width:30px;height:30px;border-radius:50%}.frow .grow{flex:1;min-width:0}.frow small{color:var(--mut)}
+.set .banner,.set h3{cursor:pointer}.set h3:hover{color:var(--ac)}
+.mini img{cursor:pointer;border:2px solid transparent}.mini img.off{opacity:.28;filter:grayscale(1)}.mini img.on{border-color:var(--ok)}
+.bbox{display:flex;gap:14px;align-items:center;background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:12px}.bbox img{width:64px;height:64px;border-radius:10px}

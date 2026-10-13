@@ -31,9 +31,24 @@ const updater = autoUpdater && {
   install: () => autoUpdater.quitAndInstall(true, true),
 };
 
-let win;
+// ---- SteamCardExchange : fenêtre de connexion + lecture du texte des pages (session persistante) ----
+const sceBridge = {
+  open: () => new Promise((resolve) => {
+    const w = new BrowserWindow({ width: 1100, height: 800, title: 'SteamCardExchange — connecte-toi avec Steam puis ferme cette fenêtre', webPreferences: { partition: 'persist:sce' }, autoHideMenuBar: true });
+    w.loadURL('https://www.steamcardexchange.net/'); w.on('closed', resolve);
+  }),
+  async scrape(url) {
+    const w = new BrowserWindow({ show: false, webPreferences: { partition: 'persist:sce' } });
+    try { await w.loadURL(url); await new Promise((r) => setTimeout(r, 2500)); return await w.webContents.executeJavaScript('document.body.innerText'); }
+    finally { w.destroy(); }
+  },
+};
+
+let win, serverMod = null;
+app.on('before-quit', () => { try { if (serverMod) serverMod.flush(); } catch {} }); // sauvegarde tout à la fermeture
 async function createWindow() {
-  const server = require('./server');
+  const server = serverMod = require('./server');
+  server.setSce(sceBridge);
   if (updater) server.setUpdater(updater); else server.setUpdater({ status: () => ({ ...u, status: 'dev' }), check: async () => { throw new Error('Mises à jour disponibles uniquement dans le logiciel installé.'); }, install() {} });
   const port = await server.start(38217).catch(() => server.start(0)); // port fixe : les préférences du navigateur intégré sont conservées
   win = new BrowserWindow({ width: 1320, height: 900, minWidth: 900, minHeight: 600, backgroundColor: '#0b1220',

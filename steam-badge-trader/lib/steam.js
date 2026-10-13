@@ -131,6 +131,11 @@ function saveCache() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { try { fs.mkdirSync(dataDir(), { recursive: true }); fs.writeFileSync(cacheFile(), JSON.stringify(setCache)); } catch {} }, 1500);
 }
+function flushCache() { // appelé à la fermeture de l'application
+  clearTimeout(saveTimer);
+  if (!setCache) return;
+  try { fs.mkdirSync(dataDir(), { recursive: true }); fs.writeFileSync(cacheFile(), JSON.stringify(setCache)); } catch {}
+}
 const cachedSet = (appid, currency) => loadCache()[appid + ':' + currency] || null;
 
 // maxAge : âge maximal accepté (ms). Infinity = toujours utiliser le cache s'il existe.
@@ -150,4 +155,4 @@ async function getSet(appid, currency, maxAge = Infinity) {
   return { set, fromCache: false, t: Date.now() };
 }
 
-module.exports = { rate, resolveSteamId, getSummaries, getProfile, getBadgeStats, getOwnedNames, getFriends, getInventory, getCards, getSet, cachedSet, CDN, sleep, rarityPoints };
+module.exports = { rate, resolveSteamId, getSummaries, getProfile, getBadgeStats, getOwnedNames, getFriends, getInventory, getCards, getSet, cachedSet, flushCache, CDN, sleep, rarityPoints };

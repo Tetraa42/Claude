@@ -1,18 +1,19 @@
 const $ = (s) => document.querySelector(s);
 const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-const money = (n, c) => n.toLocaleString('fr-FR', { style: 'currency', currency: c === 1 ? 'USD' : c === 2 ? 'GBP' : 'EUR' });
+const money = (n, c) => n.toLocaleString('fr-FR', { style: 'currency', currency: (c ?? st.currency) === 1 ? 'USD' : (c ?? st.currency) === 2 ? 'GBP' : 'EUR' });
 const nf = (n) => Number(n).toLocaleString('fr-FR');
-let st = null, filter = 'all', view = 'sets', rankTab = 'friends', cur = null, pv = null, source = 'bot', friendId = '', timer = null, lastSig = '', glob = null;
+const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+let st = null, timer = null, lastSig = '', glob = null, detail = null;
+const prefs = Object.assign({ view: 'sets', filter: 'all', sort: 'cost', rankTab: 'friends', rankMetric: 'level' }, lsGet('sbt.prefs', {})); // mémorisés d'une session à l'autre
+const savePrefs = () => lsSet('sbt.prefs', prefs);
+let filter = prefs.filter, view = prefs.view, rankTab = prefs.rankTab;
+const basket = new Set(lsGet('sbt.basket', []));
+const saveBasket = () => lsSet('sbt.basket', [...basket]);
+const T = { source: 'bot', friendId: '', friends: [], pv: null, askSel: new Set(), giveSel: new Set() };
 
 const THEMES = [['nuit', 'Nuit', '#66c0f4'], ['steam', 'Steam', '#1a9fff'], ['clair', 'Clair', '#f3f6fc'], ['violet', 'Violet', '#c084fc'], ['foret', 'Forêt', '#4ade80'], ['braise', 'Braise', '#fb923c'], ['ocean', 'Océan', '#22d3ee'], ['sakura', 'Sakura', '#f9a8d4'], ['noir', 'Noir', '#e5e7eb']];
-
-function toast(t, bad) { const e = $('#toast'); e.textContent = t; e.className = 'show' + (bad ? ' bad' : ''); setTimeout(() => (e.className = ''), 4500); }
-async function api(u, o) {
-  const r = await fetch(u, o !== undefined ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) } : undefined);
-  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j;
-}
-const setTheme = (t) => { document.documentElement.dataset.theme = t; };
-
 const FILTERS = [
   ['all', 'Tous', () => true],
   ['near', '🎯 Presque à 100 %', (s) => s.missingCount > 0 && s.missingCount <= 2],
@@ -27,13 +28,40 @@ const FILTERS = [
   ['done', '🏆 Badges terminés', null],
 ];
 
+function toast(t, bad) { const e = $('#toast'); e.textContent = t; e.className = 'show' + (bad ? ' bad' : ''); setTimeout(() => (e.className = ''), 4500); }
+async function api(u, o) {
+  const r = await fetch(u, o !== undefined ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) } : undefined);
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j;
+}
+const setTheme = (t) => { document.documentElement.dataset.theme = t; };
+
 async function poll() {
   clearTimeout(timer);
   try { st = await api('/api/state'); render(); } catch (e) { $('#err').hidden = false; $('#err').textContent = '⚠ ' + e.message; }
-  const busy = !st || st.progress.running || st.bot.status === 'loading' || st.friends.status === 'loading' || st.rank.status === 'loading' || ['checking', 'downloading'].includes(st.update && st.update.status);
+  const sc = st && st.credits.sce;
+  const busy = !st || st.progress.running || st.bot.status === 'loading' || st.friends.status === 'loading' || st.rank.status === 'loading' || (sc && sc.scan.running) || ['checking', 'downloading'].includes(st.update && st.update.status);
   timer = setTimeout(poll, busy ? 1500 : 12000);
 }
 
+// ---------- panier ----------
+function cardIndex() { // cartes manquantes de tous les jeux, par hash
+  const m = new Map();
+  for (const s of st.sets) for (const c of s.cards) if (!c.owned) m.set(c.hash, { ...c, appid: s.appid, game: s.name, friends: s.friends.filter((f) => f.have.includes(c.hash)) });
+  return m;
+}
+function renderBasket() {
+  const idx = cardIndex();
+  if (!st.progress.running) for (const h of [...basket]) if (!idx.has(h)) basket.delete(h);
+  const n = basket.size, val = [...basket].reduce((t, h) => t + (idx.get(h) ? idx.get(h).price : 0), 0);
+  $('#basket').hidden = !n || $('#dlg').open; $('#bk').textContent = `🛒 ${n} carte(s) dans le panier · ${money(val)}`;
+  const xg = $('#xcount'); if (xg) xg.textContent = `🛒 ${n} carte(s) dans le panier`;
+  saveBasket();
+}
+function toggleCards(hashes, on) { for (const h of hashes) (on ? basket.add(h) : basket.delete(h)); renderBasket(); if ($('#xdlg').open && detail) renderDetail(); }
+$('#bkclear').onclick = () => { basket.clear(); renderBasket(); if (detail && $('#xdlg').open) renderDetail(); };
+$('#bkgo').onclick = () => openTrade();
+
+// ---------- affichage principal ----------
 function render() {
   setTheme(st.theme);
   const p = st.profile, g = st.progress;
@@ -43,30 +71,34 @@ function render() {
     $('#lvl').textContent = p.level; $('#ring').style.strokeDashoffset = 327 * (1 - p.intoLevel / p.needed);
     $('#proj').textContent = st.projection.level; $('#gain').textContent = '+' + st.projection.gainXp;
   } else $('#name').textContent = 'Lecture de ton profil Steam…';
-  $('#tot').textContent = money(st.sets.reduce((t, s) => t + s.cost, 0), st.currency);
+  $('#tot').textContent = money(st.sets.reduce((t, s) => t + s.cost, 0));
   $('#kcred').hidden = st.credits.balance == null; if (st.credits.balance != null) $('#cred').textContent = nf(st.credits.balance);
+  $('#kcval').hidden = st.credits.ownedValue == null; if (st.credits.ownedValue != null) $('#cval').textContent = nf(st.credits.ownedValue);
 
   $('#status').hidden = !(g.running || g.refreshing);
   if (g.running || g.refreshing) {
     $('#stt').textContent = g.wait ? `Steam demande de ralentir : reprise dans ${g.wait} s (rien n'est perdu)…`
       : g.running ? `${g.phase}${g.total ? ` — ${g.done}/${g.total} jeux` : ''}` : 'Mise à jour des prix en arrière-plan…';
     $('#stbar').style.width = (g.running ? (g.total ? (100 * g.done) / g.total : 5) : 100) + '%';
-    $('#sts').textContent = g.running && g.total ? (g.fetchLeft ? `${g.fetchLeft} jeu(x) à récupérer chez Steam (~${g.etaMin} min) — les autres viennent de la mémoire` : 'Tout vient de la mémoire : instantané') : '';
+    $('#sts').textContent = g.running && g.total ? (g.fetchLeft ? `${g.fetchLeft} jeu(x) à récupérer chez Steam (~${g.etaMin} min) — les autres viennent de la mémoire (sauvegardée au fur et à mesure)` : 'Tout vient de la mémoire : instantané') : '';
   }
   $('#err').hidden = !g.error; if (g.error) $('#err').textContent = '⚠ ' + g.error;
   $('#botst').textContent = { idle: 'pas chargé', loading: 'chargement…', error: '⚠ ' + (st.bot.error || ''), ready: `✔ ${nf(st.bot.count)} cartes · ${nf(st.bot.games)} jeux${st.bot.botOnly ? ' · scan limité à ses jeux' : ''}` }[st.bot.status];
   $('#frst').textContent = st.friends.status === 'loading' ? `analyse ${st.friends.done}/${st.friends.total}…`
     : st.friends.status === 'ready' ? `✔ ${st.friends.count} amis analysés` : st.friends.status === 'error' ? '⚠ ' + st.friends.error : 'non analysés';
+  const sc = st.credits.sce;
+  $('#scest').textContent = sc.scan.running ? `lecture ${sc.scan.done}/${sc.scan.total}…` : sc.scan.error ? '⚠ ' + sc.scan.error : sc.connected || st.credits.balance != null ? `✔ solde ${st.credits.balance ?? '?'} · ${sc.games} jeu(x) lus` : 'non connecté';
+  $('#scebtn').textContent = sc.connected || st.credits.balance != null ? 'Lire les crédits des sets' : 'Connecter';
   $('#nboost').textContent = st.boosters.reduce((t, b) => t + b.count, 0) || '';
   const u = st.update, upd = $('#upd'); upd.hidden = !(u && ['available', 'downloading', 'ready'].includes(u.status));
   if (!upd.hidden) upd.textContent = u.status === 'ready' ? '↻ Redémarrer pour mettre à jour' : u.status === 'downloading' ? `⬇ Téléchargement ${u.progress}%` : '⬇ Mise à jour disponible';
-  $('#meta').textContent = st.updatedAt ? `Analyse du ${new Date(st.updatedAt).toLocaleString('fr-FR')} · prix gardés en mémoire, rafraîchis en arrière-plan` : '';
+  $('#meta').textContent = st.updatedAt ? `Analyse du ${new Date(st.updatedAt).toLocaleString('fr-FR')} · tout est gardé en mémoire (fermer le logiciel ne perd rien)` : '';
   $('#chips').innerHTML = FILTERS.map(([k, label, fn]) => {
     const n = k === 'done' ? st.completed.length : st.sets.filter(fn).length;
     return `<button class="chip ${k === filter ? 'on' : ''}" data-f="${k}">${label} <i>${n}</i></button>`;
   }).join('');
-  if ($('#sdlg').open) renderUpdate();
-  showView();
+  if ($('#sdlg').open) { renderUpdate(); renderSce(); }
+  renderBasket(); showView();
 }
 
 function showView() {
@@ -75,38 +107,96 @@ function showView() {
   if (view === 'sets') draw(); if (view === 'boosters') drawBoosters(); if (view === 'rank') drawRank();
 }
 $('#views').onclick = (e) => {
-  const b = e.target.closest('button[data-v]'); if (b) { view = b.dataset.v; lastSig = ''; showView(); if (view === 'rank' && rankTab === 'global') loadGlobal(); }
+  const b = e.target.closest('button[data-v]'); if (b) { view = prefs.view = b.dataset.v; savePrefs(); lastSig = ''; showView(); if (view === 'rank' && rankTab === 'global') loadGlobal(); }
   if (e.target.closest('#upd')) { const u = st.update; if (u.status === 'ready') api('/api/update/install', {}); else openSettings(); }
 };
 
 // ---------- sets ----------
 function draw() {
   const q = $('#q').value.toLowerCase(), sort = $('#sort').value;
-  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits, st.sets.map((s) => [s.appid, s.ownedUnique, s.botHas, s.friends.length, s.cost]), st.completed.length, st.progress.running]);
+  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botHas, s.friends.length, s.cost, s.credits]), st.completed.length, st.progress.running]);
   if (sig === lastSig) return; lastSig = sig;
   if (filter === 'done') {
-    $('#h2').innerHTML = 'Badges terminés <small>niveau 5 — 100 %</small>';
+    $('#h2').innerHTML = 'Badges terminés <small>niveau 5 — 100 % · clique pour voir le détail</small>';
     $('#grid').innerHTML = st.completed.filter((b) => b.name.toLowerCase().includes(q)).map((b) => `
-      <article class="set done"><img class="banner" src="${esc(b.banner)}" alt="" onerror="this.remove()"><div class="body"><header><h3>${esc(b.name)}</h3><span class="pill ok">Niveau ${b.level} ✔</span></header>
-      <a class="lnk" href="https://steamcommunity.com/my/gamecards/${b.appid}/" target="_blank" rel="noopener">Voir le badge ↗</a></div></article>`).join('') || '<p class="empty">Aucun badge niveau 5 pour le moment.</p>';
+      <article class="set done"><img class="banner" data-detail="${b.appid}" src="${esc(b.banner)}" alt="" onerror="this.remove()"><div class="body"><header><h3 data-detail="${b.appid}">${esc(b.name)}</h3><span class="pill ok">Niveau ${b.level} ✔</span></header>
+      <button class="cta" data-detail="${b.appid}">Voir les données</button></div></article>`).join('') || '<p class="empty">Aucun badge niveau 5 pour le moment.</p>';
     return;
   }
-  $('#h2').innerHTML = 'Sets à compléter <small>' + { cost: 'du moins cher au plus cher', missing: 'les plus proches de 100 %', pct: 'les plus avancés', name: 'par nom' }[sort] + '</small>';
+  $('#h2').innerHTML = 'Sets à compléter <small>' + { cost: 'du moins cher au plus cher', missing: 'les plus proches de 100 %', pct: 'les plus avancés', name: 'par nom' }[sort] + ' · clique sur un jeu pour le détail</small>';
   const fn = FILTERS.find((f) => f[0] === filter)[2];
   const by = { cost: (a, b) => a.cost - b.cost, missing: (a, b) => a.missingCount - b.missingCount || a.cost - b.cost, pct: (a, b) => b.ownedUnique / b.total - a.ownedUnique / a.total, name: (a, b) => a.name.localeCompare(b.name) }[sort];
   const list = st.sets.filter((s) => fn(s) && s.name.toLowerCase().includes(q)).sort(by);
   const bal = st.credits.balance;
   $('#grid').innerHTML = list.map((s) => `
-  <article class="set"><img class="banner" src="${esc(s.banner)}" alt="" loading="lazy" onerror="this.remove()">
-   <div class="body"><header><h3>${esc(s.name)}</h3><span class="pill">${s.badgeLevel ? 'Niv. ' + s.badgeLevel + ' → ' + (s.badgeLevel + 1) : 'Nouveau badge'}</span></header>
-    <div class="fan">${s.cards.map((c) => `<img loading="lazy" src="${esc(c.img)}" title="${esc(c.name)} — ${esc(c.priceText || '')}${c.credits ? ' · ' + c.credits + ' crédit(s)' : ''}${c.bot ? ' · dispo chez le bot' : ''}" class="${c.owned ? '' : 'miss'}${c.bot ? ' bot' : ''}" alt="${esc(c.name)}">`).join('')}</div>
+  <article class="set"><img class="banner" data-detail="${s.appid}" src="${esc(s.banner)}" alt="" loading="lazy" onerror="this.remove()">
+   <div class="body"><header><h3 data-detail="${s.appid}">${esc(s.name)}</h3><span class="pill">${s.badgeLevel ? 'Niv. ' + s.badgeLevel + ' → ' + (s.badgeLevel + 1) : 'Nouveau badge'}</span></header>
+    <div class="fan">${s.cards.map((c) => `<img loading="lazy" src="${esc(c.img)}" title="${esc(c.name)} — ${esc(c.priceText || '')}${c.credits != null ? ' · ' + c.credits + ' crédit(s)' : ''}${c.bot ? ' · dispo chez le bot' : ''}" class="${c.owned ? '' : 'miss'}${c.bot ? ' bot' : ''}" alt="${esc(c.name)}">`).join('')}</div>
     <div class="meter"><i style="width:${(100 * s.ownedUnique) / s.total}%"></i></div>
     <div class="row"><span>${s.ownedUnique}/${s.total} cartes · ${s.dupes} doublon(s)</span><span>+100 XP</span></div>
     <div class="tags">${s.botHas ? `<span class="tag bot">🤖 ${s.botHas}/${s.missingCount} chez le bot</span>` : ''}${s.friends.length ? `<span class="tag fr">👥 ${s.friends.length} ami(s)</span>` : ''}${s.credits != null && s.missingCount ? `<span class="tag cr">💳 ${s.credits} crédit(s)${bal != null ? (bal >= s.credits ? ' ✔' : ' ✖') : ''}</span>` : ''}</div>
-    <div class="row"><span class="price ${s.cost ? '' : 'free'}">${s.cost ? money(s.cost, st.currency) : 'Prêt à crafter !'}${s.stale ? ' <small title="prix en cours de rafraîchissement">~</small>' : ''}</span><a class="lnk" href="${esc(s.link)}" target="_blank" rel="noopener">Comparer sur SCE ↗</a></div>
+    <div class="row"><span class="price ${s.cost ? '' : 'free'}">${s.cost ? money(s.cost) : 'Prêt à crafter !'}${s.stale ? ' <small title="prix en cours de rafraîchissement">~</small>' : ''}</span><a class="lnk" href="${esc(s.link)}" target="_blank" rel="noopener">Comparer sur SCE ↗</a></div>
     <button class="cta" data-app="${s.appid}">${s.cost ? '⇄ Compléter par échange' : '🔨 Crafter le badge (Steam)'}</button></div>
   </article>`).join('') || `<p class="empty">${st.progress.running ? 'Analyse en cours, les sets apparaissent ici au fur et à mesure…' : 'Aucun set ne correspond à ce filtre.'}</p>`;
 }
+$('#grid').addEventListener('click', (e) => {
+  const d = e.target.closest('[data-detail]'); if (d) return openDetail(Number(d.dataset.detail));
+  const b = e.target.closest('.cta'); if (!b) return;
+  const s = st.sets.find((x) => x.appid == b.dataset.app);
+  if (!s.cost) return window.open(`${st.profile.url.replace(/\/$/, '')}/gamecards/${s.appid}/`, '_blank');
+  toggleCards(s.cards.filter((c) => !c.owned).map((c) => c.hash), true); openTrade(); // « compléter » = tout le set manquant dans le panier
+});
+
+// ---------- fiche détaillée d'un badge ----------
+async function openDetail(appid) {
+  $('#xbody').innerHTML = '<p class="mut">Chargement…</p>'; detail = null; $('#xdlg').showModal();
+  try { detail = await api('/api/game/' + appid); renderDetail(); } catch (e) { $('#xbody').innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
+}
+function renderDetail() {
+  const d = detail, s = d.set, bal = st.credits.balance, maxed = d.badge.level >= 5;
+  const prof = st.profile.url.replace(/\/$/, '');
+  const missing = s.cards.filter((c) => !c.owned);
+  const botCards = missing.filter((c) => c.bot);
+  $('#xbody').innerHTML = `
+  <div class="xhead"><img src="${esc(s.banner)}" alt="" onerror="this.remove()"><h2>${esc(s.name)}</h2></div>
+  <div class="row"><span><span class="pill ${maxed ? 'ok' : ''}">Badge niveau ${d.badge.level}/5${maxed ? ' ✔' : ''}</span> ${d.badge.xp ? `· ${d.badge.xp} XP` : ''}</span>
+    <span><a class="lnk" href="${prof}/gamecards/${s.appid}/" target="_blank" rel="noopener">Page du badge Steam ↗</a> · <a class="lnk" href="${esc(s.link)}" target="_blank" rel="noopener">SteamCardExchange ↗</a> · <a class="lnk" href="https://store.steampowered.com/app/${s.appid}" target="_blank" rel="noopener">Boutique ↗</a></span></div>
+  <div class="stats">
+    <div class="stat"><b>${s.ownedUnique}/${s.total}</b><small>cartes possédées</small></div>
+    <div class="stat"><b>${s.dupes}</b><small>doublon(s)</small></div>
+    <div class="stat"><b>${money(s.cost)}</b><small>pour compléter</small></div>
+    <div class="stat"><b>${s.credits != null ? s.credits : '–'}</b><small>crédits manquants${s.credits != null && bal != null ? (bal >= s.credits ? ' · tu as assez ✔' : ' · il t\'en manque ' + +(s.credits - bal).toFixed(2)) : ''}</small></div>
+    <div class="stat"><b>${s.creditsOwned != null ? s.creditsOwned : '–'}</b><small>crédits de tes cartes</small></div>
+  </div>
+  ${s.credits == null && st.credits.sce.available ? '<p class="mut small">Crédits non lus pour ce jeu. <button class="ghost sm" data-act="readcred">💳 Lire sur SteamCardExchange</button></p>' : ''}
+  ${d.boosters ? `<div class="xsec"><h4>📦 Boosters</h4><div class="bbox"><img src="${esc(d.boosters.img)}" alt=""><div class="grow"><b>${d.boosters.count} booster(s)</b> pour ce jeu<br><small class="mut">3 cartes au hasard — l'ouverture est définitive.</small></div><button class="cta" style="width:auto;padding:10px 18px" data-act="boost">📦 Ouvrir un booster</button></div></div>` : ''}
+  <div class="xsec"><h4>Cartes <small class="mut">— coche celles à échanger (panier)</small></h4>
+  <table class="cards"><tr><th></th><th>Carte</th><th>Possédée</th><th>Prix</th><th>Crédits</th><th>Bot</th><th>Amis</th></tr>${s.cards.map((c) => `
+    <tr class="${c.owned ? '' : 'miss'} ${basket.has(c.hash) ? 'sel' : ''}"><td>${c.owned ? '' : `<input type="checkbox" data-h="${esc(c.hash)}" ${basket.has(c.hash) ? 'checked' : ''}>`}</td>
+    <td><img src="${esc(c.img)}" alt="" loading="lazy"><a class="lnk" href="https://steamcommunity.com/market/listings/753/${encodeURIComponent(c.hash)}" target="_blank" rel="noopener">${esc(c.name)}</a></td>
+    <td>${c.owned ? '× ' + c.owned : '<span class="mut">manquante</span>'}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.credits != null ? c.credits : '–'}</td>
+    <td>${c.owned ? '' : c.bot ? '🤖 ' + c.bot : '–'}</td><td>${c.owned ? '' : (() => { const f = s.friends.filter((x) => x.have.includes(c.hash)); return f.length ? '👥 ' + f.length : '–'; })()}</td></tr>`).join('')}</table></div>
+  <div class="xsec"><h4>⇄ Échanges possibles</h4>
+    <div class="flist">
+     <div class="frow"><span>🤖</span><div class="grow"><b>${esc(d.bot.name)}</b><br><small>${d.bot.status !== 'ready' ? 'inventaire du bot non chargé' : botCards.length ? `a ${botCards.length}/${missing.length} de tes cartes manquantes : ${botCards.map((c) => esc(c.name)).join(', ')}` : 'n\'a aucune de tes cartes manquantes'}</small></div>${botCards.length ? '<button class="ghost sm" data-act="selbot">Sélectionner</button>' : ''}</div>
+     ${s.friends.map((f) => `<div class="frow"><img src="${esc(f.avatar || '')}" alt=""><div class="grow"><b>${esc(f.name)}</b><br><small>a ${f.have.length}/${missing.length} : ${f.have.map((h) => esc((s.cards.find((c) => c.hash === h) || {}).name)).join(', ')}</small></div><button class="ghost sm" data-act="selfriend" data-f="${f.steamid}">Sélectionner</button></div>`).join('') || (st.friends.status === 'ready' ? '<p class="mut small">Aucun ami n\'a tes cartes manquantes.</p>' : '<p class="mut small">Scanne tes amis (page Sets) pour voir qui a tes cartes.</p>')}
+    </div>
+    <div class="row" style="margin-top:10px"><span><button class="ghost sm" data-act="selall">Tout sélectionner (manquantes)</button> <button class="ghost sm" data-act="selnone">Désélectionner</button></span></div></div>
+  <div class="row xfoot"><span id="xcount"></span><button class="go" style="width:auto;padding:12px 24px;margin:0" data-act="trade">⇄ Lancer l'échange</button></div>`;
+  renderBasket();
+}
+$('#xbody').addEventListener('change', (e) => { const h = e.target.dataset && e.target.dataset.h; if (h !== undefined) toggleCards([h], e.target.checked); });
+$('#xbody').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-act]'); if (!b || !detail) return;
+  const s = detail.set, missing = s.cards.filter((c) => !c.owned), act = b.dataset.act;
+  if (act === 'selall') toggleCards(missing.map((c) => c.hash), true);
+  if (act === 'selnone') toggleCards(missing.map((c) => c.hash), false);
+  if (act === 'selbot') toggleCards(missing.filter((c) => c.bot).map((c) => c.hash), true);
+  if (act === 'selfriend') { const f = s.friends.find((x) => x.steamid === b.dataset.f); toggleCards(f.have, true); T.friendId = f.steamid; T.pref = 'friend'; }
+  if (act === 'trade') { $('#xdlg').close(); openTrade(); }
+  if (act === 'boost') openBooster(s.appid, detail.boosters.assetid, s.name, b);
+  if (act === 'readcred') { await api('/api/sce/scan', { appid: s.appid }); toast('Lecture des crédits lancée…'); setTimeout(() => detail && openDetail(s.appid), 6000); }
+});
 
 // ---------- connexion Steam (échanges, boosters) ----------
 function askGuard() {
@@ -124,66 +214,89 @@ async function ensureLogin() {
   return r.status === 'ready';
 }
 
-// ---------- échange ----------
-$('#grid').addEventListener('click', (e) => {
-  const b = e.target.closest('.cta'); if (!b) return;
-  cur = st.sets.find((s) => s.appid == b.dataset.app);
-  if (!cur.cost) return window.open(`${st.profile.url.replace(/\/$/, '')}/gamecards/${cur.appid}/`, '_blank');
-  $('#dt').textContent = cur.name; pv = null; $('#pv').hidden = true; $('#note').textContent = ''; $('#go').disabled = true;
-  source = cur.botHas ? 'bot' : cur.friends.length ? 'friend' : 'bot'; friendId = cur.friends[0] ? cur.friends[0].steamid : '';
-  setSource(source); $('#dlg').showModal();
-});
+// ---------- échange (panier multi-cartes) ----------
+function openTrade() {
+  if (!basket.size) return toast('Sélectionne d\'abord des cartes (clique sur un jeu pour le détail).', true);
+  const idx = cardIndex(), hs = [...basket].filter((h) => idx.has(h));
+  if (!hs.length) return toast('Ces cartes ne sont plus manquantes.', true);
+  const botN = hs.filter((h) => idx.get(h).bot).length, fr = new Map();
+  for (const h of hs) for (const f of idx.get(h).friends) fr.set(f.steamid, { id: f.steamid, name: f.name, n: (fr.get(f.steamid) ? fr.get(f.steamid).n : 0) + 1 });
+  T.friends = [...fr.values()].sort((a, b) => b.n - a.n);
+  if (!T.friends.find((f) => f.id === T.friendId)) T.friendId = T.friends[0] ? T.friends[0].id : '';
+  T.source = T.pref === 'friend' && T.friends.length ? 'friend' : botN ? 'bot' : T.friends.length ? 'friend' : 'url'; T.pref = null; T.botN = botN;
+  $('#dsub').textContent = `${hs.length} carte(s) dans le panier — disponibles chez le bot : ${botN} · chez des amis : ${T.friends.length} ami(s)`;
+  $('#note').textContent = ''; $('#pv').hidden = true; $('#go').disabled = true;
+  $('#basket').hidden = true; setSource(T.source); $('#dlg').showModal();
+}
+$('#dlg').addEventListener('close', renderBasket);
 function setSource(s) {
-  source = s;
+  T.source = s; T.pv = null;
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.s === s));
-  const box = $('#srcbox'); pv = null; $('#pv').hidden = true; $('#go').disabled = true;
-  if (s === 'bot') box.innerHTML = `<p class="mut">${cur.botHas ? `Le bot a ${cur.botHas} de tes ${cur.missingCount} carte(s) manquante(s).` : 'Le bot n\'a aucune de tes cartes manquantes.'}</p><label class="lab">Lien d'échange du bot (si pas déjà dans les Réglages)<input id="turl" placeholder="https://steamcommunity.com/tradeoffer/new/?partner=…&token=…"></label>`;
-  if (s === 'friend') box.innerHTML = cur.friends.length ? `<label class="lab">Ami<select id="fsel">${cur.friends.map((f) => `<option value="${f.steamid}" ${f.steamid === friendId ? 'selected' : ''}>${esc(f.name)} — ${f.have.length} carte(s)</option>`).join('')}</select></label>`
-    : '<p class="mut">Aucun ami n\'a tes cartes manquantes (clique d\'abord sur « Scanner mes amis »).</p>';
+  const box = $('#srcbox'); $('#pv').hidden = true; $('#go').disabled = true;
+  if (s === 'bot') box.innerHTML = `<p class="mut">${T.botN ? `Le bot a ${T.botN} carte(s) de ton panier.` : 'Le bot n\'a aucune carte de ton panier.'}</p><label class="lab">Lien d'échange du bot (si pas déjà dans les Réglages)<input id="turl" placeholder="https://steamcommunity.com/tradeoffer/new/?partner=…&token=…"></label>`;
+  if (s === 'friend') box.innerHTML = T.friends.length ? `<label class="lab">Ami<select id="fsel">${T.friends.map((f) => `<option value="${f.id}" ${f.id === T.friendId ? 'selected' : ''}>${esc(f.name)} — ${f.n} carte(s) du panier</option>`).join('')}</select></label>`
+    : '<p class="mut">Aucun ami n\'a les cartes du panier (clique d\'abord sur « Scanner mes amis »).</p>';
   if (s === 'url') box.innerHTML = '<label class="lab">Lien d\'échange du partenaire<input id="turl" placeholder="https://steamcommunity.com/tradeoffer/new/?partner=…&token=…"></label>';
-  if (s === 'friend' && cur.friends.length) { $('#fsel').onchange = () => { friendId = $('#fsel').value; preview(); }; friendId = $('#fsel').value; }
-  if ((s === 'bot' && cur.botHas) || (s === 'friend' && cur.friends.length)) preview();
+  if (s === 'friend' && T.friends.length) { $('#fsel').onchange = () => { T.friendId = $('#fsel').value; preview(); }; T.friendId = $('#fsel').value; }
+  if ((s === 'bot' && T.botN) || (s === 'friend' && T.friends.length)) preview();
   if (st.demo && $('#turl')) $('#turl').value = 'https://steamcommunity.com/tradeoffer/new/?partner=123456&token=demo';
 }
 $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) setSource(b.dataset.s); };
 async function preview() {
   try {
-    pv = await api('/api/trade/preview', { appid: cur.appid, source, friendId, tradeUrl: $('#turl') ? $('#turl').value : '' });
-    const im = (l) => l.map((c) => `<img src="${esc(c.img)}" title="${esc(c.name)}" alt="${esc(c.name)}">`).join('') || '<small>–</small>';
-    $('#askl').innerHTML = im(pv.ask); $('#givel').innerHTML = im(pv.give); $('#pv').hidden = false;
-    $('#note').textContent = (pv.notFound ? `${pv.notFound} carte(s) manquante(s) introuvable(s) chez cette source. ` : '') + (pv.give.length < pv.ask.length ? 'Tu n\'as pas assez de cartes en trop à donner en retour.' : '');
-    $('#go').disabled = !pv.ask.length;
+    const pv = T.pv = await api('/api/trade/preview', { hashes: [...basket], source: T.source, friendId: T.friendId, tradeUrl: $('#turl') ? $('#turl').value : '' });
+    T.askSel = new Set(pv.ask.map((c) => c.assetid)); T.giveSel = new Set(pv.give.map((c) => c.assetid));
+    drawPreview();
+    $('#note').textContent = pv.notFound.length ? `Introuvable chez cette source : ${pv.notFound.join(', ')}.` : '';
   } catch (e) { toast(e.message, true); }
 }
+function drawPreview() {
+  const pv = T.pv, im = (l, sel, k) => l.map((c) => `<img data-${k}="${esc(c.assetid)}" class="${sel.has(c.assetid) ? 'on' : 'off'}" src="${esc(c.img)}" title="${esc(c.name)}${c.game ? ' — ' + esc(c.game) : ''}" alt="${esc(c.name)}">`).join('') || '<small>–</small>';
+  $('#askl').innerHTML = im(pv.ask, T.askSel, 'a'); $('#givel').innerHTML = im([...pv.give, ...pv.giveMore], T.giveSel, 'g'); $('#pv').hidden = false;
+  $('#askn').textContent = `(${T.askSel.size})`; $('#givn').textContent = `(${T.giveSel.size})`;
+  $('#go').disabled = !T.askSel.size;
+  const warn = T.giveSel.size < T.askSel.size ? 'Tu donnes moins de cartes que tu n\'en demandes : l\'offre risque d\'être refusée. ' : '';
+  $('#note').textContent = (T.pv.notFound.length ? `Introuvable chez cette source : ${T.pv.notFound.join(', ')}. ` : '') + warn + 'Clique sur une carte pour l\'inclure ou l\'exclure.';
+}
+$('#pv').addEventListener('click', (e) => {
+  const i = e.target.closest('img'); if (!i) return;
+  const [set, id] = i.dataset.a !== undefined ? [T.askSel, i.dataset.a] : [T.giveSel, i.dataset.g];
+  set.has(id) ? set.delete(id) : set.add(id); drawPreview();
+});
 $('#srcbox').addEventListener('change', (e) => { if (e.target.id === 'turl') preview(); });
 $('#go').onclick = async () => {
   $('#go').disabled = true;
   try {
     if (!(await ensureLogin())) { $('#go').disabled = false; return; }
-    const r = await api('/api/trade/send', { source, friendId, tradeUrl: $('#turl') ? $('#turl').value : '', give: pv.give.map((c) => c.assetid), ask: pv.ask.map((c) => c.assetid) });
-    toast('✅ ' + r.note); $('#dlg').close();
+    const r = await api('/api/trade/send', { source: T.source, friendId: T.friendId, tradeUrl: $('#turl') ? $('#turl').value : '', give: [...T.giveSel], ask: [...T.askSel] });
+    for (const c of T.pv.ask) if (T.askSel.has(c.assetid)) basket.delete(c.hash);
+    toast('✅ ' + r.note); $('#dlg').close(); renderBasket();
   } catch (e) { toast(e.message, true); $('#go').disabled = false; }
 };
 
 // ---------- boosters ----------
+async function openBooster(appid, assetid, game, btn) {
+  if (!confirm(`Ouvrir un booster « ${game} » ? Cette action est définitive.`)) return;
+  if (btn) btn.disabled = true;
+  try {
+    if (!(await ensureLogin())) { if (btn) btn.disabled = false; return; }
+    const r = await api('/api/boosters/open', { appid, assetid });
+    $('#bt').textContent = `Booster ${game} : tu as reçu`;
+    $('#bres').innerHTML = r.cards.map((c) => `<img src="${esc(c.img)}" title="${esc(c.name)}${c.foil ? ' (foil)' : ''}" alt="${esc(c.name)}">`).join('');
+    if ($('#xdlg').open) $('#xdlg').close();
+    $('#bdlg').showModal(); poll();
+  } catch (err) { toast(err.message, true); if (btn) btn.disabled = false; }
+}
 function drawBoosters() {
   $('#bgrid').innerHTML = st.boosters.map((b) => `
-  <article class="set"><img class="banner" src="${esc(b.banner)}" alt="" onerror="this.remove()"><div class="body"><header><h3>${esc(b.game)}</h3><span class="pill">× ${b.count}</span></header>
+  <article class="set"><img class="banner" data-detail="${b.appid}" src="${esc(b.banner)}" alt="" onerror="this.remove()"><div class="body"><header><h3 data-detail="${b.appid}">${esc(b.game)}</h3><span class="pill">× ${b.count}</span></header>
     <div class="fan"><img src="${esc(b.img)}" alt="" style="width:96px;height:96px"></div>
     <button class="cta" data-boost="${b.appid}" data-asset="${b.assetid}">📦 Ouvrir un booster</button></div></article>`).join('') || '<p class="empty">Aucun booster dans ton inventaire.</p>';
 }
-$('#bgrid').addEventListener('click', async (e) => {
+$('#bgrid').addEventListener('click', (e) => {
+  const d = e.target.closest('[data-detail]'); if (d) return openDetail(Number(d.dataset.detail));
   const b = e.target.closest('[data-boost]'); if (!b) return;
-  const bo = st.boosters.find((x) => String(x.appid) === b.dataset.boost);
-  if (!confirm(`Ouvrir un booster « ${bo.game} » ? Cette action est définitive.`)) return;
-  b.disabled = true;
-  try {
-    if (!(await ensureLogin())) { b.disabled = false; return; }
-    const r = await api('/api/boosters/open', { appid: bo.appid, assetid: b.dataset.asset });
-    $('#bt').textContent = `Booster ${bo.game} : tu as reçu`;
-    $('#bres').innerHTML = r.cards.map((c) => `<img src="${esc(c.img)}" title="${esc(c.name)}${c.foil ? ' (foil)' : ''}" alt="${esc(c.name)}">`).join('');
-    $('#bdlg').showModal(); poll();
-  } catch (err) { toast(err.message, true); b.disabled = false; }
+  const bo = st.boosters.find((x) => String(x.appid) === b.dataset.boost); openBooster(bo.appid, b.dataset.asset, bo.game, b);
 });
 
 // ---------- classement ----------
@@ -208,15 +321,21 @@ function drawRank() {
     if (!joined) $('#rjoin').onclick = async () => { if (!confirm('Ton pseudo, ton avatar, ton niveau et tes badges (publics) seront visibles par les autres utilisateurs. Continuer ?')) return; try { await api('/api/rank/join', {}); toast('Tu es dans le classement !'); await loadGlobal(); poll(); } catch (e) { toast(e.message, true); } };
   }
 }
-$('#rtabs').onclick = (e) => { const b = e.target.closest('button'); if (b) { rankTab = b.dataset.r; if (rankTab === 'global') loadGlobal(); else drawRank(); } };
-$('#rmetric').onchange = drawRank;
+$('#rtabs').onclick = (e) => { const b = e.target.closest('button'); if (b) { rankTab = prefs.rankTab = b.dataset.r; savePrefs(); if (rankTab === 'global') loadGlobal(); else drawRank(); } };
+$('#rmetric').onchange = () => { prefs.rankMetric = $('#rmetric').value; savePrefs(); drawRank(); };
 
 // ---------- barre d'outils ----------
-$('#chips').onclick = (e) => { const b = e.target.closest('.chip'); if (b) { filter = b.dataset.f; lastSig = ''; render(); } };
-$('#q').oninput = () => st && draw(); $('#sort').onchange = () => st && draw();
+$('#chips').onclick = (e) => { const b = e.target.closest('.chip'); if (b) { filter = prefs.filter = b.dataset.f; savePrefs(); lastSig = ''; render(); } };
+$('#q').oninput = () => st && draw(); $('#sort').onchange = () => { prefs.sort = $('#sort').value; savePrefs(); st && draw(); };
 $('#refresh').onclick = async () => { await api('/api/refresh', {}); lastSig = ''; poll(); };
 $('#botref').onclick = async () => { await api('/api/bot/refresh', {}); poll(); };
 $('#frscan').onclick = async () => { await api('/api/friends/scan', {}); toast('Analyse des amis lancée (en arrière-plan)'); poll(); };
+$('#scebtn').onclick = async () => {
+  const sc = st.credits.sce;
+  if (!sc.available) return toast('La connexion à SteamCardExchange fonctionne dans le logiciel installé.', true);
+  if (!(sc.connected || st.credits.balance != null)) return openSettings();
+  await api('/api/sce/scan', {}); toast('Lecture des crédits lancée (en arrière-plan)'); poll();
+};
 
 // ---------- réglages ----------
 function renderUpdate() {
@@ -226,12 +345,21 @@ function renderUpdate() {
   b.disabled = ['checking', 'downloading'].includes(u.status);
   $('#updst').textContent = { none: '✔ Tu as déjà la dernière version.', available: `Version ${u.latest} trouvée, téléchargement…`, ready: `Version ${u.latest} prête : le logiciel va redémarrer.`, error: '⚠ ' + (u.error || ''), dev: 'Disponible uniquement dans le logiciel installé.' }[u.status] || '';
 }
+function renderSce() {
+  const sc = st.credits.sce; if (!sc) return;
+  const found = sc.candidates.length ? ' Valeurs trouvées : ' + sc.candidates.slice(0, 4).map((c) => `${c.value} (« ${c.ctx} »)`).join(' ; ') : '';
+  $('#sceInfo').textContent = !sc.available ? 'Disponible dans le logiciel installé.' : sc.connected || sc.balance != null ? `✔ Solde lu : ${sc.balance ?? '?'} crédit(s) · ${sc.games} jeu(x) lus.${found}` : 'Pas encore connecté.';
+}
 $('#updbtn').onclick = async () => {
   try {
     if (st.update && st.update.status === 'ready') return api('/api/update/install', {});
     await api('/api/update/check', {}); poll();
   } catch (e) { $('#updst').textContent = '⚠ ' + e.message; }
 };
+$('#sceLogin').onclick = async () => { $('#sceInfo').textContent = 'Une fenêtre SteamCardExchange s\'est ouverte : connecte-toi avec Steam puis ferme-la.'; try { await api('/api/sce/login', {}); } catch (e) { $('#sceInfo').textContent = '⚠ ' + e.message; } await poll(); renderSce(); };
+$('#sceBal').onclick = async () => { $('#sceInfo').textContent = 'Lecture…'; try { await api('/api/sce/balance', {}); } catch (e) { $('#sceInfo').textContent = '⚠ ' + e.message; } await poll(); renderSce(); };
+$('#sceScan').onclick = async () => { try { await api('/api/sce/scan', {}); toast('Lecture des crédits lancée (en arrière-plan)'); poll(); } catch (e) { toast(e.message, true); } };
+$('#sceDbg').onclick = async () => { const t = await (await fetch('/api/sce/debug')).text(); try { await navigator.clipboard.writeText(t); toast('Diagnostic copié : colle-le dans la discussion'); } catch { prompt('Copie ce diagnostic :', t.slice(0, 3000)); } };
 $('#themes').innerHTML = THEMES.map(([k, n, c]) => `<button class="ghost sw" data-t="${k}"><i style="background:${c}"></i>${n}</button>`).join('');
 $('#themes').onclick = async (e) => { const b = e.target.closest('[data-t]'); if (!b) return; setTheme(b.dataset.t); st.theme = b.dataset.t; await api('/api/settings', { THEME: b.dataset.t }); markTheme(); };
 const markTheme = () => document.querySelectorAll('.sw').forEach((b) => b.classList.toggle('on', b.dataset.t === document.documentElement.dataset.theme));
@@ -242,7 +370,7 @@ async function openSettings() {
   $('#s_bot').value = c.BOT_PROFILE; $('#s_boturl').value = c.BOT_TRADE_URL; $('#s_botonly').checked = c.BOT_ONLY !== '0';
   $('#s_cbal').value = c.CREDITS_BALANCE; $('#s_cpc').value = c.CREDITS_PER_CARD; $('#s_lb').value = c.LEADERBOARD_URL;
   for (const [id, k] of [['s_pwd', 'STEAM_PASSWORD'], ['s_shared', 'STEAM_SHARED_SECRET'], ['s_ident', 'STEAM_IDENTITY_SECRET']]) { $('#' + id).value = ''; $('#' + id).placeholder = c[k + '_SET'] ? '••••••• (enregistré)' : ''; }
-  markTheme(); renderUpdate(); $('#sdlg').showModal();
+  markTheme(); renderUpdate(); renderSce(); $('#sdlg').showModal();
 }
 $('#ssave').onclick = async (e) => {
   e.preventDefault();
@@ -253,7 +381,8 @@ $('#ssave').onclick = async (e) => {
     $('#sdlg').close(); toast('Réglages enregistrés'); lastSig = ''; glob = null; poll();
   } catch (err) { toast(err.message, true); }
 };
-// bouton ⚙ ajouté dans la barre d'onglets
 const cfgBtn = document.createElement('button'); cfgBtn.id = 'cfg'; cfgBtn.className = 'ghost'; cfgBtn.textContent = '⚙ Réglages'; $('#views').appendChild(cfgBtn); cfgBtn.onclick = openSettings;
 
-poll().then(() => { if (st && st.demo && !st.seenSetup) { api('/api/settings', { SEEN_SETUP: '1' }); openSettings(); } });
+// restaure l'interface comme à la dernière fermeture
+$('#sort').value = prefs.sort; $('#rmetric').value = prefs.rankMetric;
+poll().then(() => { if (view === 'rank' && rankTab === 'global') loadGlobal(); if (st && st.demo && !st.seenSetup) { api('/api/settings', { SEEN_SETUP: '1' }); openSettings(); } });

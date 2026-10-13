@@ -5,7 +5,7 @@
 <header class="hero">
   <div class="who"><img id="avatar" alt=""><div><h1 id="name">Chargement…</h1><div class="sub" id="sub"></div></div></div>
   <div class="level"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="track"/><circle id="ring" cx="60" cy="60" r="52" class="ring"/></svg><div class="lv"><small>NIVEAU</small><b id="lvl">–</b></div></div>
-  <div class="goal"><div class="kpi"><span id="proj">–</span><small>niveau atteignable</small></div><div class="kpi"><span id="gain">–</span><small>XP à gagner</small></div><div class="kpi"><span id="tot">–</span><small>coût total</small></div><div class="kpi" id="kcred" hidden><span id="cred">–</span><small>crédits SCE</small></div></div>
+  <div class="goal"><div class="kpi"><span id="proj">–</span><small>niveau atteignable</small></div><div class="kpi"><span id="gain">–</span><small>XP à gagner</small></div><div class="kpi"><span id="tot">–</span><small>coût total</small></div><div class="kpi" id="kcred" hidden><span id="cred">–</span><small>crédits SCE</small></div><div class="kpi" id="kcval" hidden><span id="cval">–</span><small>valeur de mes cartes</small></div></div>
 </header>
 <main>
   <div class="status" id="status" hidden><div class="spin"></div><div class="st"><b id="stt"></b><div class="meter"><i id="stbar" style="width:0"></i></div><small id="sts"></small></div></div>
@@ -15,6 +15,7 @@
   <section id="v-sets">
     <div class="sources">
       <div class="src"><b>🤖 Bot CardExchange</b><span id="botst">…</span><button id="botref" class="ghost sm" title="Recharger l'inventaire du bot">↻</button></div>
+      <div class="src"><b>💳 SteamCardExchange</b><span id="scest">non connecté</span><button id="scebtn" class="ghost sm">Lire mes crédits</button></div>
       <div class="src"><b>👥 Amis</b><span id="frst">non analysés</span><button id="frscan" class="ghost sm">Scanner mes amis</button></div>
     </div>
     <div class="bar"><h2 id="h2">Sets à compléter</h2>
@@ -40,11 +41,15 @@
   </section>
 </main>
 
+<div id="basket" hidden><span id="bk"></span><span class="grow"></span><button id="bkgo" class="ghost">⇄ Lancer l'échange</button><button id="bkclear" class="ghost sm">Vider</button></div>
+
+<dialog id="xdlg" class="wide-dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form><div id="xbody"></div></dialog>
+
 <dialog id="dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form>
-  <h3 id="dt"></h3>
+  <h3 id="dt">Échange — panier</h3><p class="mut" id="dsub"></p>
   <div class="tabs" id="tabs"><button data-s="bot" class="on">🤖 Bot</button><button data-s="friend">👥 Ami</button><button data-s="url">🔗 Lien</button></div>
   <div id="srcbox"></div>
-  <div id="pv" class="pv" hidden><div><h4>Tu reçois</h4><div id="askl" class="mini"></div></div><div class="arrow">⇄</div><div><h4>Tu donnes</h4><div id="givel" class="mini"></div></div></div>
+  <div id="pv" class="pv" hidden><div><h4>Tu reçois <span id="askn"></span></h4><div id="askl" class="mini"></div></div><div class="arrow">⇄</div><div><h4>Tu donnes <span id="givn"></span></h4><div id="givel" class="mini"></div></div></div>
   <p id="note" class="note"></p>
   <button id="go" class="go" disabled>🚀 Lancer l'échange</button>
 </dialog>
@@ -67,7 +72,11 @@
     <label class="lab">Profil du bot<input id="s_bot" placeholder="https://steamcommunity.com/id/CardExchange"></label>
     <label class="lab">Lien d'échange du bot (pour lui envoyer des offres)<input id="s_boturl"></label></section>
   <section class="sec"><h4>💳 Crédits SteamCardExchange</h4>
-    <p class="mut small">Je ne peux pas lire le site automatiquement : renseigne ici tes valeurs, elles s'affichent sur les sets.</p>
+    <p class="mut small">Connecte-toi au site avec Steam : l'app lit ensuite ton solde et les crédits de chaque carte. (La lecture est automatique mais le site n'a pas pu être vérifié depuis ici : si ça ne remonte rien, copie le diagnostic et envoie-le moi.)</p>
+    <div class="updrow"><button id="sceLogin" class="ghost">🔑 Se connecter à SteamCardExchange</button><button id="sceBal" class="ghost">↻ Lire mon solde</button></div>
+    <p id="sceInfo" class="note"></p>
+    <div class="updrow"><button id="sceScan" class="ghost">💳 Lire les crédits de mes sets</button><button id="sceDbg" class="ghost">📋 Copier le diagnostic</button></div>
+    <p class="mut small">À défaut, saisie manuelle :</p>
     <label class="lab">Mes crédits<input id="s_cbal" inputmode="decimal" placeholder="ex. 12.5"></label>
     <label class="lab">Coût d'une carte en crédits<input id="s_cpc" inputmode="decimal" placeholder="ex. 1"></label></section>
   <section class="sec"><h4>🌍 Classement des utilisateurs</h4>

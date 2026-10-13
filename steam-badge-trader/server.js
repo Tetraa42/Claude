@@ -16,6 +16,7 @@ const steam = require('./lib/steam');
 const demo = require('./lib/demo');
 const trader = require('./lib/trader');
 const engine = require('./lib/engine');
+const sce = require('./lib/sce');
 const { S } = engine;
 
 const base = { ...process.env };
@@ -26,6 +27,7 @@ const isDemo = () => base.DEMO === '1' || !env.STEAM_API_KEY;
 const cfg = () => ({ key: env.STEAM_API_KEY, profile: env.STEAM_PROFILE, currency: Number(env.CURRENCY || 3), botProfile: env.BOT_PROFILE || engine.BOT_DEFAULT, botOnly: env.BOT_ONLY !== '0' });
 let updater = null;
 const setUpdater = (u) => { updater = u; };
+const setSce = (b) => sce.setBridge(b);
 
 const app = express();
 app.use(express.json());
@@ -39,6 +41,7 @@ function ensureStarted() {
   if (started) return;
   started = true;
   if (isDemo()) return engine.loadDemo();
+  sce.reset();
   const had = engine.loadSaved(); // affichage immédiat des analyses mémorisées
   if (!had || !engine.isFresh()) engine.run(cfg());
 }
@@ -104,12 +107,14 @@ const parseTrade = (u) => {
   return (BigInt(m[1]) + 76561197960265728n).toString();
 };
 
-// Prépare l'échange : cartes manquantes que la source possède / cartes en trop que je donne en retour.
+// Prépare l'échange à partir du panier : cartes (hash) de n'importe quels jeux ; la source (bot / ami / lien) fournit ce qu'elle a.
 app.post('/api/trade/preview', async (req, res) => {
   try {
-    const { appid, source, tradeUrl, friendId } = req.body;
-    const set = S.sets.find((s) => s.appid === Number(appid));
-    if (!set) throw new Error('Set inconnu');
+    const { source, tradeUrl, friendId } = req.body;
+    let hashes = Array.isArray(req.body.hashes) ? req.body.hashes : [];
+    if (req.body.appid) { const set = S.sets.find((x) => x.appid === Number(req.body.appid)); hashes = set ? set.cards.filter((c) => !c.owned).map((c) => c.hash) : []; } // compat : « tout le set »
+    if (!hashes.length) throw new Error('Le panier est vide : sélectionne des cartes.');
+    const wanted = engine.missingByHash();
     let theirs;
     if (source === 'bot') {
       if (S.bot.status !== 'ready') throw new Error('Inventaire du bot pas encore chargé : ' + (S.bot.error || 'patiente quelques secondes'));
@@ -120,12 +125,35 @@ app.post('/api/trade/preview', async (req, res) => {
     } else {
       theirs = engine.groupBy((await steam.getCards(parseTrade(tradeUrl))).filter((c) => c.tradable), (c) => c.hash);
     }
-    const missing = set.cards.filter((c) => !c.owned);
-    const ask = missing.flatMap((c) => (theirs.get(c.hash) || []).slice(0, 1).map((t) => ({ name: c.name, img: c.img, assetid: t.assetid, price: c.price })));
-    const give = engine.spareCards().slice(0, ask.length).map((c) => ({ name: c.name, img: c.img, assetid: c.assetid }));
-    res.json({ set: set.name, ask, give, notFound: missing.length - ask.length, spare: engine.spareCards().length });
+    const ask = [], notFound = [];
+    for (const h of [...new Set(hashes)]) {
+      const c = wanted.get(h); if (!c) continue;
+      const t = (theirs.get(h) || [])[0];
+      if (t) ask.push({ hash: h, name: c.name, img: c.img, assetid: t.assetid, price: c.price, game: c.game }); else notFound.push(c.name);
+    }
+    const spare = engine.spareCards().filter((c) => !hashes.includes(c.hash));
+    const give = spare.slice(0, ask.length).map((c) => ({ name: c.name, img: c.img, assetid: c.assetid, game: c.game }));
+    const giveMore = spare.slice(ask.length, ask.length + 60).map((c) => ({ name: c.name, img: c.img, assetid: c.assetid, game: c.game }));
+    res.json({ ask, give, giveMore, notFound, spare: spare.length });
   } catch (e) { res.status(400).json({ error: e.code === 'PRIVATE' ? 'Inventaire privé' : e.message }); }
 });
+
+// Fiche détaillée d'un badge / jeu : cartes, prix, crédits, boosters, bot, amis.
+app.get('/api/game/:appid', async (req, res) => {
+  try { res.json(await engine.gameDetail(Number(req.params.appid), cfg(), Number(env.CREDITS_PER_CARD) || 0)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ---- SteamCardExchange : crédits ----
+app.get('/api/sce/status', (_, res) => res.json(sce.status()));
+app.post('/api/sce/login', async (_, res) => { try { res.json(await sce.login()); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/sce/balance', async (_, res) => { try { res.json(await sce.refreshBalance()); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/sce/scan', (req, res) => {
+  const only = req.body && req.body.appid ? S.sets.filter((x) => x.appid === Number(req.body.appid)) : [...S.sets].sort((a, b) => a.cost - b.cost);
+  if (isDemo()) return res.json({ ok: true });
+  sce.scanGames(only); res.json({ ok: true });
+});
+app.get('/api/sce/debug', (_, res) => res.type('text').send(sce.debug() || 'Aucun diagnostic pour le moment.'));
 
 app.get('/api/trade/status', (_, res) => res.json({ ready: trader.state.ready, needGuard: trader.state.needGuard, error: trader.state.error, demo: isDemo() }));
 app.post('/api/trade/login', async (req, res) => {
@@ -158,7 +186,7 @@ app.post('/api/settings', (req, res) => {
   try {
     const before = RESCAN.map((k) => env[k] || '').join('|');
     config.save(DATA_DIR, req.body || {}); reloadEnv();
-    if (RESCAN.map((k) => env[k] || '').join('|') !== before) { started = false; Object.assign(S, { profile: null, sets: [], completed: [], error: null }); try { fs.unlinkSync(path.join(DATA_DIR, 'state.json')); } catch {} } // seuls les réglages d'analyse relancent tout
+    if (RESCAN.map((k) => env[k] || '').join('|') !== before) { sce.reset(); started = false; Object.assign(S, { profile: null, sets: [], completed: [], error: null }); try { fs.unlinkSync(path.join(DATA_DIR, 'state.json')); } catch {} } // seuls les réglages d'analyse relancent tout
     res.json({ ok: true });
   }
   catch (e) { res.status(400).json({ error: e.message }); }
@@ -170,5 +198,5 @@ function start(port) {
     srv.on('error', reject);
   });
 }
-module.exports = { start, setUpdater };
+module.exports = { start, setUpdater, setSce, flush: () => engine.flush() };
 if (require.main === module) start(Number(env.PORT || 3000)).then((p) => console.log(`Steam Badge Trader → http://localhost:${p} ${isDemo() ? '(MODE DÉMO)' : ''}`));

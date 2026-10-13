@@ -10,6 +10,12 @@ Télécharge `Steam-Badge-Trader-Setup-x.x.x.exe` depuis l'onglet **Releases** d
 - Filtres : presque à 100 %, prêts à crafter, nouveaux badges, badges en cours, doublons, < 0,50 €, chez le bot, chez des amis, badges terminés.
 - 🤖 Bot CardExchange : son inventaire est comparé à tes cartes manquantes. 👥 Amis : « Scanner mes amis » (liste d'amis publique requise).
 
+## Fiche badge, panier, crédits
+- Clique sur un jeu : fiche avec cartes, prix, crédits, boosters (bouton d'ouverture), et échanges possibles (bot / amis).
+- Coche des cartes de plusieurs jeux : elles vont dans le **panier**, puis un seul « Lancer l'échange » (tu peux exclure des cartes demandées ou choisir celles que tu donnes).
+- Crédits SteamCardExchange : Réglages → connexion au site (fenêtre intégrée), lecture du solde et des crédits par carte. Lecture heuristique : si rien ne remonte, « Copier le diagnostic ».
+- Tout est sauvegardé au fur et à mesure (et à la fermeture) ; filtres, tri, panier et onglets sont retrouvés au prochain lancement.
+
 ## Mise à jour
 Réglages → **⬇ Mettre à jour le logiciel** : l'app cherche la dernière release GitHub, la télécharge, puis redémarre dessus. Tes réglages et les analyses mémorisées (dossier de données de l'app) sont conservés.
 

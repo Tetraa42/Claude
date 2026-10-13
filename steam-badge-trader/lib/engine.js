@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const steam = require('./steam');
 const demo = require('./demo');
+const sce = require('./sce');
 const { levelFromXp, totalXpForLevel } = require('./levels');
 
 const BOT_DEFAULT = 'https://steamcommunity.com/id/CardExchange';
@@ -93,10 +94,12 @@ async function run(cfg) {
     const sid = await steam.resolveSteamId(cfg.profile, cfg.key);
     S.profile = await steam.getProfile(cfg.key, sid);
     S.names = await steam.getOwnedNames(cfg.key, sid);
+    saveState();
     S.completed = S.profile.badges.filter((b) => b.level >= 5).map((b) => ({ appid: b.appid, name: S.names.get(b.appid) || `Jeu ${b.appid}`, level: b.level, banner: header(b.appid) }));
     S.phase = 'Lecture de ton inventaire (cartes et boosters)';
     const inv = await steam.getInventory(sid);
     S.myCards = inv.cards; S.boosters = inv.boosters;
+    saveState();
 
     let botFull = null;
     if (cfg.botOnly && !(S.bot.apps && Date.now() - S.bot.t < BOT_TTL)) { S.phase = 'Lecture de l\'inventaire du bot'; botFull = await loadBot(cfg); }
@@ -109,6 +112,7 @@ async function run(cfg) {
     S.needFetch = apps.filter(([a]) => !steam.cachedSet(a, cfg.currency)).length;
     S.phase = 'Analyse des sets et des prix';
     const seen = new Set();
+    let sinceSave = 0;
     for (const [appid, mine] of apps) {
       if (id !== runId) return;
       try {
@@ -118,6 +122,7 @@ async function run(cfg) {
         if (set.length) upsert(buildSet({ appid, name: S.names.get(appid), lvl: lvl.get(appid) || 0, set, mine, t }));
       } catch (e) { if (/429/.test(e.message)) throw e; }
       S.done++;
+      if (++sinceSave >= 5) { sinceSave = 0; saveState(); } // rien n'est perdu si on ferme le logiciel en cours d'analyse
     }
     S.sets = S.sets.filter((s) => seen.has(s.appid));
     if (botFull) trimBot(botFull);
@@ -193,24 +198,36 @@ async function scanRank(cfg) {
   } catch (e) { R.status = 'error'; R.error = e.message; }
 }
 
-function loadDemo() { Object.assign(S, { demo: true, running: false, error: null }, demo.demoState()); }
+function loadDemo() { Object.assign(S, { demo: true, running: false, error: null }, demo.demoState()); demo.demoCredits(sce); }
 
 // ---------- vue envoyée à l'interface ----------
+// Ajoute au set les infos du bot, des amis et des crédits SteamCardExchange.
+function enrichSet(s, cpc = 0) {
+  const B = S.bot, F = S.friends;
+  const missing = s.cards.filter((c) => !c.owned);
+  const credit = (c) => { const v = sce.cardCredits(s.appid, c.name); return v != null ? v : cpc || null; };
+  const cards = s.cards.map((c) => ({ ...c, assetids: undefined, bot: c.owned ? 0 : (B.map.get(c.hash) || []).length, credits: credit(c) }));
+  const friends = F.list.map((f) => {
+    const inv = F.inv.get(f.steamid); if (!inv) return null;
+    const have = missing.filter((c) => inv.has(c.hash)).map((c) => c.hash);
+    return have.length ? { steamid: f.steamid, name: f.name, avatar: f.avatar, have } : null;
+  }).filter(Boolean).sort((a, b) => b.have.length - a.have.length);
+  const known = cards.filter((c) => c.credits != null);
+  const sum = (arr, f) => +arr.reduce((t, c) => t + f(c), 0).toFixed(2);
+  return { ...s, cards, botHas: cards.filter((c) => !c.owned && c.bot).length, friends,
+    credits: known.length ? sum(cards.filter((c) => !c.owned && c.credits != null), (c) => c.credits) : null,
+    creditsOwned: known.length ? sum(cards.filter((c) => c.owned), (c) => c.credits * c.owned) : null,
+    creditsRead: sce.hasGame(s.appid), stale: Date.now() - (s.priceT || 0) > PRICE_TTL };
+}
+
 function snapshot(opt = {}) {
   const B = S.bot, F = S.friends, cpc = Number(opt.creditsPerCard) || 0;
-  const sets = S.sets.map((s) => {
-    const missing = s.cards.filter((c) => !c.owned);
-    const cards = s.cards.map((c) => ({ ...c, assetids: undefined, bot: c.owned ? 0 : (B.map.get(c.hash) || []).length, credits: cpc || undefined }));
-    const friends = F.list.map((f) => {
-      const inv = F.inv.get(f.steamid); if (!inv) return null;
-      const have = missing.filter((c) => inv.has(c.hash)).map((c) => c.hash);
-      return have.length ? { steamid: f.steamid, name: f.name, avatar: f.avatar, have } : null;
-    }).filter(Boolean).sort((a, b) => b.have.length - a.have.length);
-    return { ...s, cards, botHas: cards.filter((c) => !c.owned && c.bot).length, friends, credits: cpc ? +(missing.length * cpc).toFixed(2) : null, stale: Date.now() - (s.priceT || 0) > PRICE_TTL };
-  });
+  const sets = S.sets.map((s) => enrichSet(s, cpc));
   const boosters = [...groupBy(S.boosters, (b) => b.appid).values()].map((g) => ({ appid: g[0].appid, name: g[0].name, game: g[0].game, img: g[0].img, count: g.length, assetid: g[0].assetid, banner: header(g[0].appid) }));
   const p = S.profile, gain = sets.length * 100;
   const fetchLeft = Math.max(0, S.needFetch - S.fetched);
+  const manual = opt.creditsBalance === '' || opt.creditsBalance == null ? null : Number(opt.creditsBalance);
+  const scest = sce.status();
   return {
     demo: S.demo, currency: S.currency, profile: p, sets, completed: S.completed, boosters, updatedAt: S.updatedAt,
     progress: { running: S.running, refreshing: S.refreshing, phase: S.phase, done: S.done, total: S.total, fetchLeft, etaMin: Math.ceil((fetchLeft * 2.6) / 60),
@@ -219,9 +236,34 @@ function snapshot(opt = {}) {
     friends: { status: F.status, error: F.error, done: F.done, total: F.total, count: F.list.length },
     rank: { status: S.rank.status, error: S.rank.error, done: S.rank.done, total: S.rank.total, list: S.rank.list },
     projection: p && { gainXp: gain, level: levelFromXp(p.xp + gain).level, nextLevelXp: totalXpForLevel(p.level + 1) - p.xp },
-    credits: { balance: opt.creditsBalance === '' || opt.creditsBalance == null ? null : Number(opt.creditsBalance), perCard: cpc || null },
+    credits: { balance: scest.balance != null ? scest.balance : manual, perCard: cpc || null, sce: scest,
+      ownedValue: sets.some((s) => s.creditsOwned != null) ? +sets.reduce((t, s) => t + (s.creditsOwned || 0), 0).toFixed(2) : null },
   };
 }
+
+// Détails d'un jeu (même s'il n'est pas dans la liste des sets, ex. badge déjà niveau 5).
+async function gameDetail(appid, cfg, cpc) {
+  const lvl = levelsMap();
+  let set = S.sets.find((s) => s.appid === appid);
+  if (!set) {
+    const { set: cards, t } = await steam.getSet(appid, cfg.currency, Infinity);
+    if (!cards.length) throw new Error('Aucune carte trouvée pour ce jeu');
+    set = buildSet({ appid, name: S.names.get(appid) || cards[0].game, lvl: lvl.get(appid) || 0, set: cards, mine: S.myCards.filter((c) => c.appid === appid), t });
+  }
+  const badge = S.profile && S.profile.badges.find((b) => b.appid === appid);
+  const boosters = S.boosters.filter((b) => b.appid === appid);
+  return { set: enrichSet(set, cpc), badge: badge ? { level: badge.level, xp: badge.xp } : { level: 0, xp: 0 },
+    boosters: boosters.length ? { count: boosters.length, assetid: boosters[0].assetid, img: boosters[0].img, name: boosters[0].name } : null,
+    bot: { status: S.bot.status, name: S.bot.name } };
+}
+
+// Cartes manquantes (tous jeux confondus) retrouvées par leur hash, pour le panier d'échange.
+function missingByHash() {
+  const m = new Map();
+  for (const s of S.sets) for (const c of s.cards) if (!c.owned) m.set(c.hash, { ...c, appid: s.appid, game: s.name });
+  return m;
+}
+function flush() { saveState(); steam.flushCache(); sce.flush(); }
 
 // Cartes que je peux donner : doublons, et toutes les cartes des jeux dont le badge est déjà niveau 5.
 function spareCards() {
@@ -233,4 +275,4 @@ function spareCards() {
   }
   return out;
 }
-module.exports = { S, run, refreshBot, scanFriends, scanRank, loadDemo, loadSaved, isFresh, saveState, snapshot, spareCards, groupBy, BOT_DEFAULT };
+module.exports = { S, run, refreshBot, scanFriends, scanRank, loadDemo, loadSaved, isFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };

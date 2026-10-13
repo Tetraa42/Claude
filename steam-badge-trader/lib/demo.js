@@ -71,6 +71,11 @@ function demoRank(S) {
 }
 
 
+function demoCredits(sce) {
+  const names = ['Héros', 'Gardien', 'Ombre', 'Relique', 'Forteresse', 'Dragon', 'Éclair', 'Mage', 'Voyageur'];
+  sce.setDemo(GAMES.map((g) => g.appid), names);
+}
+
 function fillFriends(F, S) {
   const missing = S.sets.flatMap((s) => s.cards.filter((c) => !c.owned));
   F.list.forEach((f, i) => {
@@ -84,4 +89,4 @@ function fillFriends(F, S) {
 function svgAvatar() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#66c0f4"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="120" height="120" fill="url(#a)"/><circle cx="60" cy="46" r="22" fill="#fff" opacity=".9"/><path d="M16 112c4-30 26-40 44-40s40 10 44 40z" fill="#fff" opacity=".9"/></svg>`;
 }
-module.exports = { demoState, demoRank, fillFriends, svgCard, svgAvatar, svgBanner };
+module.exports = { demoCredits, demoState, demoRank, fillFriends, svgCard, svgAvatar, svgBanner };
