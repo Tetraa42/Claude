@@ -33,15 +33,29 @@ function findCredits(text) { // tous les nombres collés au mot « credit(s) »
   return out;
 }
 
+const NAV = /inventor|profile|account|credit|wallet|balance|\bmy\b|user|bot|trade|exchange/i;
+const OUT = /logout|log ?out|sign ?out|déconnex/i;
+const uniqLinks = (links) => { const seen = new Set(); return (links || []).filter((l) => l.h && !seen.has(l.h) && seen.add(l.h)); };
+
 async function refreshBalance() {
   if (!bridge) throw new Error('Connexion SteamCardExchange disponible uniquement dans le logiciel installé.');
   const d = load();
-  const text = await bridge.scrape(HOME);
-  d.candidates = findCredits(text).slice(0, 8);
-  d.connected = /log ?out|sign ?out|déconnexion/i.test(text) || d.candidates.length > 0;
+  const home = await bridge.scrape(HOME);
+  const links = uniqLinks(home.links);
+  d.connected = links.some((l) => OUT.test(l.t) || OUT.test(l.h)); // un lien « déconnexion » n'existe que si on est connecté
+  // pages susceptibles d'afficher les crédits : on visite celles du menu dont le nom/adresse évoque un compte, un inventaire…
+  const here = links.filter((l) => /steamcardexchange\.net/i.test(l.h) && l.h !== HOME && NAV.test(l.t + ' ' + l.h) && !OUT.test(l.t + l.h) && !/gamepage|games?list|news|event|privacy|disclaimer/i.test(l.h)).slice(0, 6);
+  const pages = [{ url: HOME, text: home.text }];
+  for (const l of here) { try { pages.push({ url: l.h, text: (await bridge.scrape(l.h)).text }); } catch {} }
+  d.candidates = [];
+  for (const pg of pages) for (const c of findCredits(pg.text)) d.candidates.push({ ...c, src: pg.url.replace(HOME, '') });
+  d.candidates = d.candidates.slice(0, 10);
+  if (d.candidates.length) d.connected = true;
   const mine = d.candidates.find((c) => /your|my\b|mes\b|solde|balance|credits?\s*[:=]/i.test(c.ctx)) || d.candidates[0]; // on préfère « Your credits : N »
   if (mine) { d.balance = mine.value; d.balanceT = Date.now(); }
-  d.debug = 'ACCUEIL\n' + text.slice(0, 5000);
+  d.debug = `CONNECTÉ: ${d.connected} (lien déconnexion trouvé: ${links.some((l) => OUT.test(l.t) || OUT.test(l.h))})\nPAGES LUES: ${pages.map((p) => p.url).join(' | ')}\n\nLIENS DU SITE:\n` +
+    links.filter((l) => /steamcardexchange\.net/i.test(l.h)).slice(0, 80).map((l) => `${l.t || '(sans texte)'} -> ${l.h.replace(HOME, '/')}`).join('\n') +
+    '\n\n' + pages.slice(1).map((p) => `--- ${p.url}\n${p.text.slice(0, 1200)}`).join('\n\n') + '\n\nACCUEIL\n' + home.text.slice(0, 1500);
   save();
   return status();
 }
@@ -67,7 +81,7 @@ function parseGame(text, cards) {
 async function readGame(appid, cardNames) {
   if (!bridge) throw new Error('Indisponible');
   const d = load();
-  const text = await bridge.scrape(gameUrl(appid));
+  const text = (await bridge.scrape(gameUrl(appid))).text;
   const cards = parseGame(text, cardNames);
   d.games[appid] = { t: Date.now(), cards };
   if (!Object.keys(cards).length) d.debug = `JEU ${appid}\n` + text.slice(0, 6000);

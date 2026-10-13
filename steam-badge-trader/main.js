@@ -37,10 +37,12 @@ const sceBridge = {
     const w = new BrowserWindow({ width: 1100, height: 800, title: 'SteamCardExchange — connecte-toi avec Steam puis ferme cette fenêtre', webPreferences: { partition: 'persist:sce' }, autoHideMenuBar: true });
     w.loadURL('https://www.steamcardexchange.net/'); w.on('closed', resolve);
   }),
-  async scrape(url) {
+  async scrape(url) { // renvoie le texte visible + tous les liens de la page (menu replié compris)
     const w = new BrowserWindow({ show: false, webPreferences: { partition: 'persist:sce' } });
-    try { await w.loadURL(url); await new Promise((r) => setTimeout(r, 2500)); return await w.webContents.executeJavaScript('document.body.innerText'); }
-    finally { w.destroy(); }
+    try {
+      await w.loadURL(url); await new Promise((r) => setTimeout(r, 2500));
+      return await w.webContents.executeJavaScript(`({ text: document.body.innerText, links: [...document.querySelectorAll('a[href]')].map((a) => ({ t: (a.innerText || a.title || a.getAttribute('aria-label') || '').trim().replace(/\\s+/g, ' ').slice(0, 60), h: a.href })) })`);
+    } finally { w.destroy(); }
   },
 };
 
