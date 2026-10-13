@@ -8,19 +8,15 @@
   <div class="goal"><div class="kpi"><span id="proj">–</span><small>niveau atteignable</small></div><div class="kpi"><span id="gain">–</span><small>XP à gagner</small></div><div class="kpi"><span id="tot">–</span><small>coût total</small></div><div class="kpi" id="kcred" hidden><span id="cred">–</span><small>crédits SCE</small></div><div class="kpi" id="kcval" hidden><span id="cval">–</span><small>valeur de mes cartes (crédits)</small></div></div>
 </header>
 <main>
-  <div class="status" id="status" hidden><div class="spin"></div><div class="st"><b id="stt"></b><div class="meter"><i id="stbar" style="width:0"></i></div><small id="sts"></small></div></div>
+  <div class="status" id="status" hidden><div class="spin"></div><div class="st"><b id="stt"></b></div></div>
   <div id="err" class="errbox" hidden></div>
+  <div class="scans" id="scans"></div>
   <nav class="views" id="views"><button data-v="sets" class="on">🃏 Sets</button><button data-v="boosters">📦 Boosters <i id="nboost"></i></button><button data-v="rank">🏆 Classement</button><span class="grow"></span><button id="upd" class="pillbtn" hidden>⬇ Mise à jour disponible</button></nav>
 
   <section id="v-sets">
-    <div class="sources">
-      <div class="src"><b>🤖 Bot SteamCardExchange</b><span id="botst">…</span><button id="botref" class="ghost sm" title="Relire l'inventaire du bot sur le site">↻</button></div>
-      <div class="src"><b>💳 SteamCardExchange</b><span id="scest">non connecté</span><button id="scebtn" class="ghost sm">Lire mes crédits</button></div>
-      <div class="src"><b>👥 Amis</b><span id="frst">non analysés</span><button id="frscan" class="ghost sm">Scanner mes amis</button></div>
-    </div>
     <div class="bar"><h2 id="h2">Sets à compléter</h2>
       <div class="tools"><input id="q" placeholder="Rechercher un jeu…"><select id="sort"><option value="cost">Trier : moins cher</option><option value="missing">Trier : moins de cartes manquantes</option><option value="pct">Trier : % complété</option><option value="name">Trier : nom</option></select>
-      <button id="refresh" class="ghost">↻ Actualiser</button><a class="ghost" href="https://www.steamcardexchange.net/" target="_blank" rel="noopener">SteamCardExchange ↗</a></div></div>
+      <button id="refresh" class="ghost" title="Relit ta page de badges puis scanne tes cartes">↻ Tout actualiser</button><a class="ghost" href="https://www.steamcardexchange.net/" target="_blank" rel="noopener">SteamCardExchange ↗</a></div></div>
     <div class="chips" id="chips"></div>
     <div class="meta" id="meta"></div>
     <section id="grid" class="grid"></section>
@@ -29,6 +25,7 @@
   <section id="v-boosters" hidden>
     <div class="bar"><h2>Boosters <small>packs de 3 cartes de tes jeux</small></h2></div>
     <p class="mut">Ouvrir un booster est <b>définitif</b> : il disparaît et tu reçois 3 cartes au hasard dans ton inventaire.</p>
+    <div id="gemsbar" class="gemsbar"></div>
     <section id="bgrid" class="grid"></section>
   </section>
 
@@ -68,6 +65,7 @@
     <label class="lab">Clé API Steam <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">→ la créer (domaine : localhost)</a><input id="s_key" placeholder="32 caractères"></label>
     <label class="lab">Monnaie<select id="s_cur"><option value="3">Euro (€)</option><option value="1">Dollar ($)</option><option value="2">Livre (£)</option></select></label></section>
   <section class="sec"><h4>🤖 Bot SteamCardExchange</h4>
+    <label class="check"><input type="checkbox" id="s_autocards"> Scanner aussi mes cartes au lancement (sinon : bouton « Cartes & sets »)</label>
     <label class="check"><input type="checkbox" id="s_botonly"> Scanner seulement les jeux que le bot a en stock (beaucoup plus rapide, évite le blocage de Steam)</label></section>
   <section class="sec"><h4>💳 SteamCardExchange : crédits et inventaire du bot</h4>
     <p class="mut small">Connecte-toi au site avec Steam (fenêtre intégrée) : l'app lit ton solde de crédits (page Profile) et l'inventaire du bot (stock, valeur d'une carte en crédits).</p>

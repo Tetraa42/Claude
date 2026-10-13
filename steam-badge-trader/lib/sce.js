@@ -13,7 +13,7 @@ const PROFILE_URL = HOME + 'index.php?profile';
 const INV_TTL = 30 * 60e3;
 
 let D = null, bridge = null, saveTimer = null, demoOn = false;
-const empty = () => ({ balance: null, balanceT: 0, candidates: [], connected: false, debug: '', inv: null });
+const empty = () => ({ balance: null, balanceT: 0, candidates: [], connected: false, debug: '', inv: null, games: {} });
 const load = () => { if (!D) { try { D = Object.assign(empty(), JSON.parse(fs.readFileSync(file(), 'utf8'))); } catch { D = empty(); } } return D; };
 function flush() { clearTimeout(saveTimer); if (!D || demoOn) return; try { writeJsonAtomic(file(), D); } catch {} }
 const save = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 800); };
@@ -106,8 +106,44 @@ const setDemo = (rows) => { // données fictives, jamais écrites sur le disque
   demoOn = true; D = empty();
   Object.assign(D, { balance: 12.5, connected: true, balanceT: Date.now(), candidates: [{ value: 12.5, ctx: 'Your credits: 12.5' }], inv: { t: Date.now(), total: rows.length, rows } });
 };
+// ---- page d'un jeu chez le bot (« inventorygame ») : quelles cartes il a, en quelle quantité et à quel prix ----
+function parseGameRows(rows, head) {
+  const idx = (re) => head.findIndex((h) => re.test(h));
+  const iStock = idx(/stock|amount|available|qty|quantity/i), iPrice = idx(/price|cost|pay|buy/i), iWorth = idx(/worth|get|sell/i);
+  const out = {};
+  for (const r of rows) {
+    const c = r.c || [];
+    const nameIdx = c.findIndex((x) => x && isNaN(num(x))); // la première cellule qui n'est pas un nombre = le nom de la carte
+    if (nameIdx < 0) continue;
+    const nums = c.map((x, i) => (i === nameIdx || x === '' ? NaN : num(x)));
+    const pick = (i) => (i >= 0 && !isNaN(nums[i]) ? nums[i] : null);
+    let stock = pick(iStock);
+    if (stock == null) { const only = nums.filter((n) => !isNaN(n)); stock = only.length ? only[only.length - 1] : null; } // à défaut : dernier nombre de la ligne
+    if (stock == null) continue;
+    out[norm(c[nameIdx])] = { stock, price: pick(iPrice), worth: pick(iWorth) };
+  }
+  return out;
+}
+async function checkGame(appid) {
+  if (!bridge) throw new Error(NO_SITE);
+  const d = load();
+  const r = await bridge.scrape(`${HOME}index.php?inventorygame-appid-${appid}`, { table: true });
+  const rows = r.rows || [], head = r.head || [];
+  const cards = parseGameRows(rows, head);
+  d.games = d.games || {};
+  d.games[appid] = { t: Date.now(), cards };
+  d.debug = `PAGE JEU ${appid}\nEN-TÊTES: ${JSON.stringify(head)}\nLIGNES: ${rows.length}\nEXEMPLES: ${JSON.stringify(rows.slice(0, 3))}\nRÉSULTAT: ${JSON.stringify(cards).slice(0, 800)}\n\n--- TEXTE\n${String(r.text || '').slice(0, 1500)}`;
+  save();
+  if (!Object.keys(cards).length) throw new Error('Page du jeu illisible côté bot : copie le diagnostic dans les Réglages.');
+  return cards;
+}
+const demoGame = (appid, names) => { D.games = D.games || {}; D.games[appid] = { t: Date.now(), cards: Object.fromEntries(names.map((n, i) => [norm(n), { stock: i % 3, price: 7 + (i % 4), worth: 3 }])) }; };
+const gameData = (appid) => (load().games || {})[appid] || null;
+const hasGame = (appid) => { const g = gameData(appid); return !!g && Object.keys(g.cards).length > 0; };
+const cardInfo = (appid, name) => { const g = gameData(appid); return g ? g.cards[norm(name)] || null : null; };
+
 const status = () => { const d = load(); return { available: !!bridge || demoOn, connected: d.connected, balance: d.balance, balanceT: d.balanceT, candidates: d.candidates,
   games: index().stocked, invAge: d.inv ? d.inv.t : 0, hasDebug: !!d.debug }; };
 const debug = () => load().debug || '';
 const reset = () => { if (demoOn) { demoOn = false; D = null; } };
-module.exports = { setBridge, login, refreshBalance, readInventory, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };
+module.exports = { setBridge, login, refreshBalance, readInventory, checkGame, demoGame, hasGame, cardInfo, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };

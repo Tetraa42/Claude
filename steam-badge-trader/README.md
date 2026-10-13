@@ -10,6 +10,11 @@ Télécharge `Steam-Badge-Trader-Setup-x.x.x.exe` depuis l'onglet **Releases** d
 - Filtres : presque à 100 %, prêts à crafter, nouveaux badges, badges en cours, doublons, < 0,50 €, chez le bot, chez des amis, badges terminés.
 - 🤖 Bot SteamCardExchange : son inventaire est lu depuis le tableau « Inventory » du site (stock, cartes différentes, valeur en crédits par jeu) — pas depuis Steam, trop gros (Steam bloquait avec des erreurs 429). Les échanges avec le bot se font sur son site (« Make Offer »). 👥 Amis : « Scanner mes amis » (liste d'amis publique requise ; lent : ~3 s par ami).
 
+## Scans (boutons qui se remplissent)
+Au lancement, seule ta **page de badges** est lue (profil, badges terminés, cartes à récupérer en jouant). Le reste se lance avec des boutons, chacun avec son % et son temps restant estimé :
+🏅 Badges · 🃏 Cartes & sets (inventaire + prix) · 📦 Boosters · 💎 Gemmes (même requête Steam que les cartes) · 🤖 Bot SCE · 👥 Amis · 💳 Solde.
+Dans la fiche d'un jeu : « 🤖 Le bot a-t-il mes cartes ? » lit la page du jeu chez le bot (stock et prix carte par carte) ; « 🔄 Vérifier tout ce jeu » ajoute les prix Steam à jour.
+
 ## Fiche badge, panier, crédits
 - Clique sur un jeu : fiche avec cartes, prix, crédits, boosters (bouton d'ouverture), et échanges possibles (bot / amis).
 - Coche des cartes de plusieurs jeux : elles vont dans le **panier**, puis un seul « Lancer l'échange » (tu peux exclure des cartes demandées ou choisir celles que tu donnes).

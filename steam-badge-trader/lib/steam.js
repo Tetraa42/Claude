@@ -87,7 +87,7 @@ async function getProfile(key, id) {
 }
 
 // Cartes encore à récupérer en jouant (« N card drops remaining ») : lues sur la page publique de tes badges.
-async function getBadgeDrops(id) {
+async function getBadgeDrops(id, onPage) {
   const out = new Map();
   let prevFirst = null;
   for (let page = 1; page <= 10; page++) {
@@ -97,6 +97,7 @@ async function getBadgeDrops(id) {
     const first = (/gamecards\/(\d+)/.exec(rows[0]) || [])[1];
     if (first && first === prevFirst) break; // la page ne change plus
     prevFirst = first;
+    if (onPage) onPage(page);
     for (const r of rows) {
       const a = /gamecards\/(\d+)/.exec(r);
       if (!a) continue;
@@ -127,16 +128,20 @@ const isNormalCard = (d) =>
 const isBooster = (d) => /Booster Pack/i.test(d.type || '') || /Booster Pack$/i.test(d.name || '');
 
 // Inventaire Steam (appid 753, contexte 6) : cartes normales + boosters.
-async function getInventory(id) {
-  const cards = [], boosters = [];
-  let last = '';
+async function getInventory(id, onProgress) {
+  const cards = [], boosters = [], gems = { gems: 0, sacks: 0 };
+  let last = '', seen = 0;
   for (let i = 0; i < 60; i++) {
     const d = await jget(`https://steamcommunity.com/inventory/${id}/753/6?l=english&count=2000${last ? '&start_assetid=' + last : ''}`);
     if (!d || !d.assets) break;
     const desc = new Map(d.descriptions.map((x) => [x.classid + '_' + x.instanceid, x]));
+    seen += d.assets.length;
+    if (onProgress) onProgress(seen, Number(d.total_inventory_count) || 0);
     for (const a of d.assets) {
       const x = desc.get(a.classid + '_' + a.instanceid);
       if (!x) continue;
+      if (x.market_hash_name === '753-Gems') { gems.gems += Number(a.amount) || 1; continue; }              // gemmes (en vrac)
+      if (x.market_hash_name === '753-Sack of Gems') { gems.sacks += Number(a.amount) || 1; continue; }     // sacs de 1000 gemmes
       if (isNormalCard(x)) cards.push({
         assetid: a.assetid, hash: x.market_hash_name, name: x.name, appid: Number(x.market_fee_app),
         game: (x.type || '').replace(/ Trading Card$/i, ''), img: CDN + x.icon_url + '/192fx192f', tradable: !!x.tradable,
@@ -149,7 +154,7 @@ async function getInventory(id) {
     if (!d.more_items) break;
     last = d.last_assetid;
   }
-  return { cards, boosters };
+  return { cards, boosters, gems };
 }
 const getCards = async (id) => (await getInventory(id)).cards;
 

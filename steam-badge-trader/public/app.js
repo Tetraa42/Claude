@@ -42,8 +42,56 @@ const setTheme = (t) => { document.documentElement.dataset.theme = t; lsSet('sbt
 async function poll() {
   clearTimeout(timer);
   try { st = await api('/api/state'); render(); } catch (e) { $('#err').hidden = false; $('#err').textContent = '⚠ ' + e.message; }
-  const busy = !st || st.progress.running || st.bot.status === 'loading' || st.friends.status === 'loading' || st.rank.status === 'loading' || ['checking', 'downloading'].includes(st.update && st.update.status);
+  const busy = !st || Object.values(st.tasks).some((t) => t.state === 'running') || st.progress.running || st.bot.status === 'loading' || st.friends.status === 'loading' || st.rank.status === 'loading' || ['checking', 'downloading'].includes(st.update && st.update.status);
   timer = setTimeout(poll, busy ? 1500 : 12000);
+}
+
+// ---------- boutons de scan : le bouton se remplit au fur et à mesure (% et temps restant estimé) ----------
+const SCANS = [
+  ['badges', '🏅', 'Badges', 'Scanner ma page de badges'],
+  ['cards', '🃏', 'Cartes & sets', 'Scanner mon inventaire de cartes et leurs prix'],
+  ['boosters', '📦', 'Boosters', 'Scanner mes boosters'],
+  ['gems', '💎', 'Gemmes', 'Scanner mes gemmes'],
+  ['bot', '🤖', 'Bot (SCE)', 'Lire l\'inventaire du bot SteamCardExchange'],
+  ['friends', '👥', 'Amis', 'Scanner les inventaires de mes amis'],
+  ['balance', '💳', 'Solde de crédits', 'Lire mon solde sur SteamCardExchange'],
+];
+const fmtEta = (s) => (s == null ? '' : s < 90 ? `~${Math.max(1, Math.round(s))} s` : `~${Math.ceil(s / 60)} min`);
+const ago = (t) => { const m = Math.round((Date.now() - t) / 60000); return m < 1 ? 'à l\'instant' : m < 60 ? `il y a ${m} min` : m < 1440 ? `il y a ${Math.round(m / 60)} h` : `il y a ${Math.round(m / 1440)} j`; };
+function taskInfo(k) {
+  const t = st.tasks[k], g = st.progress;
+  if (t.state === 'running') return `${t.label || 'En cours'}${k === 'cards' && g.wait ? ` · attente Steam ${g.wait} s` : ''}${t.eta ? ' · ' + fmtEta(t.eta) + ' restantes' : ''}`;
+  if (t.state === 'error') return '⚠ ' + t.error;
+  if (!t.doneAt) return 'Pas encore scanné — clique pour lancer';
+  const n = { badges: `${st.completed.length} badge(s) terminé(s)${st.dropsTotal ? ` · 🎴 ${st.dropsTotal} à récupérer` : ''}`, cards: `${st.sets.length} jeu(x)`, boosters: `${st.boosters.reduce((a, b) => a + b.count, 0)} booster(s)`,
+    gems: `${nf(st.gems.gems + st.gems.sacks * 1000)} gemme(s)`, bot: `${nf(st.bot.games)} jeux en stock`, friends: `${st.friends.count} ami(s)`, balance: `${st.credits.balance ?? '?'} crédit(s)` }[k];
+  return `✔ ${ago(t.doneAt)} · ${n}`;
+}
+function renderScans() {
+  const box = $('#scans');
+  if (!box.children.length) {
+    box.innerHTML = SCANS.map(([k, ic, name, tip]) => `<button class="scan" data-scan="${k}" title="${esc(tip)}"><span class="fill"></span><span class="t"><b>${ic} ${name}</b><small></small></span><span class="pc"></span></button>`).join('');
+  }
+  for (const [k] of SCANS) {
+    const b = box.querySelector(`[data-scan="${k}"]`), t = st.tasks[k];
+    b.className = 'scan ' + t.state; b.style.setProperty('--p', t.pct + '%');
+    b.querySelector('small').textContent = taskInfo(k); b.querySelector('small').title = taskInfo(k);
+    b.querySelector('.pc').textContent = t.state === 'running' ? t.pct + '%' : t.state === 'done' ? '↻' : t.state === 'error' ? '⟳' : '▶';
+    b.disabled = t.state === 'running';
+  }
+}
+$('#scans').addEventListener('click', safe(async (e) => {
+  const b = e.target.closest('[data-scan]'); if (!b) return;
+  const k = b.dataset.scan;
+  if (k === 'balance' && !st.demo && !st.credits.sce.connected && st.credits.balance == null) return openSettings();
+  await api('/api/scan/' + k, {}); poll();
+}));
+// bouton à remplissage pour une action sans progression connue (ex. lire une page du site) : le remplissage suit le temps estimé
+async function fillProgress(btn, estSec, promise) {
+  btn.classList.add('running'); btn.disabled = true;
+  const t0 = Date.now(), small = btn.querySelector('small'), keep = small.textContent;
+  const iv = setInterval(() => { const el = (Date.now() - t0) / 1000, p = Math.min(95, Math.round((100 * el) / estSec)); btn.style.setProperty('--p', p + '%'); btn.querySelector('.pc').textContent = p + '%'; small.textContent = `~${Math.max(1, Math.round(estSec - el))} s restantes`; }, 250);
+  try { return await promise; } finally { clearInterval(iv); btn.style.setProperty('--p', '100%'); btn.querySelector('.pc').textContent = '100%'; small.textContent = keep; }
 }
 
 // ---------- panier ----------
@@ -78,20 +126,10 @@ function render() {
   $('#kcred').hidden = st.credits.balance == null; if (st.credits.balance != null) $('#cred').textContent = nf(st.credits.balance);
   $('#kcval').hidden = st.credits.ownedValue == null; if (st.credits.ownedValue != null) $('#cval').textContent = nf(st.credits.ownedValue);
 
-  $('#status').hidden = !(g.running || g.refreshing);
-  if (g.running || g.refreshing) {
-    $('#stt').textContent = g.wait ? `Steam demande de ralentir : reprise dans ${g.wait} s (rien n'est perdu)…${st.sets.length ? '' : ' Steam a limité ton adresse suite aux essais précédents : ça se débloque tout seul, souvent en moins d\'une heure.'}`
-      : g.running ? `${g.phase}${g.total ? ` — ${g.done}/${g.total} jeux` : ''}` : 'Mise à jour des prix en arrière-plan…';
-    $('#stbar').style.width = (g.running ? (g.total ? (100 * g.done) / g.total : 5) : 100) + '%';
-    $('#sts').textContent = g.running && g.total ? (g.fetchLeft ? `${g.fetchLeft} jeu(x) à récupérer chez Steam (~${g.etaMin} min) — les autres viennent de la mémoire (sauvegardée au fur et à mesure)` : 'Tout vient de la mémoire : instantané') : '';
-  }
+  $('#status').hidden = !(g.wait || g.retryIn);
+  if (g.wait || g.retryIn) $('#stt').textContent = g.wait ? `Steam demande de ralentir : reprise dans ${g.wait} s (rien n'est perdu)…${st.sets.length ? '' : ' Steam a limité ton adresse suite aux essais précédents : ça se débloque tout seul, souvent en moins d\'une heure.'}` : `Prochaine tentative automatique dans ${Math.ceil(g.retryIn / 60)} min.`;
   $('#err').hidden = !g.error; if (g.error) $('#err').textContent = '⚠ ' + g.error + (g.retryIn ? ` Nouvelle tentative automatique dans ${Math.ceil(g.retryIn / 60)} min.` : '');
-  $('#botst').textContent = { idle: 'pas chargé', loading: 'chargement…', error: '⚠ ' + (st.bot.error || ''), ready: `✔ ${nf(st.bot.games)} jeux en stock · ${nf(st.bot.count)} cartes${st.bot.botOnly ? ' · scan limité à ses jeux' : ''}` }[st.bot.status];
-  $('#frst').textContent = st.friends.status === 'loading' ? `analyse ${st.friends.done}/${st.friends.total}…`
-    : st.friends.status === 'ready' ? `✔ ${st.friends.count} amis analysés` : st.friends.status === 'error' ? '⚠ ' + st.friends.error : 'non analysés';
-  const sc = st.credits.sce;
-  $('#scest').textContent = sc.connected || st.credits.balance != null ? `✔ solde : ${st.credits.balance ?? '?'} crédit(s)` : 'non connecté';
-  $('#scebtn').textContent = sc.connected || st.credits.balance != null ? 'Relire mon solde' : 'Connecter';
+  renderScans();
   $('#nboost').textContent = st.boosters.reduce((t, b) => t + b.count, 0) || '';
   const u = st.update, upd = $('#upd'); upd.hidden = !(u && ['available', 'downloading', 'ready'].includes(u.status));
   if (!upd.hidden) upd.textContent = u.status === 'ready' ? '↻ Redémarrer pour mettre à jour' : u.status === 'downloading' ? `⬇ Téléchargement ${u.progress}%` : '⬇ Mise à jour disponible';
@@ -117,7 +155,7 @@ $('#views').onclick = (e) => {
 // ---------- sets ----------
 function draw() {
   const q = $('#q').value.toLowerCase(), sort = $('#sort').value;
-  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botStock, s.friends.length, s.cost, s.worth, s.provisional]), st.completed.length, st.progress.running]);
+  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botStock, s.friends.length, s.cost, s.worth, s.provisional, s.botChecked, s.botHas]), st.completed.length, st.progress.running]);
   if (sig === lastSig) return; lastSig = sig;
   if (filter === 'done') {
     $('#h2').innerHTML = 'Badges terminés <small>niveau 5 — 100 % · clique pour voir le détail</small>';
@@ -138,7 +176,7 @@ function draw() {
     <div class="fan">${s.cards.map((c) => c.unknown ? '<span class="ph" title="Carte pas encore connue"></span>' : `<img loading="lazy" src="${esc(c.img)}" title="${esc(c.name)} — ${esc(c.priceText || '')}${c.credits != null ? ' · ' + c.credits + ' crédit(s) chez le bot' : ''}" class="${c.owned ? '' : 'miss'}" alt="${esc(c.name)}">`).join('')}</div>
     <div class="meter"><i style="width:${(100 * s.ownedUnique) / s.total}%"></i></div>
     <div class="row"><span>${s.ownedUnique}/${s.total} cartes · ${s.dupes} doublon(s)</span><span>+100 XP</span></div>
-    <div class="tags">${s.botStock ? `<span class="tag bot" title="Cartes en stock chez le bot SteamCardExchange">🤖 stock ${s.botStock} · ${s.botDistinct}/${s.total} différentes${s.botSets ? ' · ' + s.botSets + ' set(s) complet(s)' : ''}</span>` : ''}${s.friends.length ? `<span class="tag fr">👥 ${s.friends.length} ami(s)</span>` : ''}${s.drops ? `<span class="tag dr" title="Cartes qu'il te reste à obtenir en jouant à ce jeu">🎴 ${s.drops} à récupérer en jouant</span>` : ''}${s.worth != null ? `<span class="tag cr" title="Crédits que le bot te donne pour une carte de ce jeu">💳 ${s.worth} crédit(s)/carte</span>` : ''}</div>
+    <div class="tags">${s.botChecked ? `<span class="tag bot" title="Vérifié carte par carte sur la page du jeu chez le bot">🤖 a ${s.botHas}/${s.missingCount} de tes cartes manquantes</span>` : s.botStock ? `<span class="tag bot" title="Cartes en stock chez le bot SteamCardExchange (pas encore vérifié carte par carte)">🤖 stock ${s.botStock} · ${s.botDistinct}/${s.total} différentes${s.botSets ? ' · ' + s.botSets + ' set(s) complet(s)' : ''}</span>` : ''}${s.friends.length ? `<span class="tag fr">👥 ${s.friends.length} ami(s)</span>` : ''}${s.drops ? `<span class="tag dr" title="Cartes qu'il te reste à obtenir en jouant à ce jeu">🎴 ${s.drops} à récupérer en jouant</span>` : ''}${s.worth != null ? `<span class="tag cr" title="Crédits que le bot te donne pour une carte de ce jeu">💳 ${s.worth} crédit(s)/carte</span>` : ''}</div>
     <div class="row"><span class="price ${s.cost === 0 ? 'free' : ''}">${s.cost == null ? '<small class="mut">prix en cours de lecture…</small>' : s.cost ? money(s.cost) : 'Prêt à crafter !'}${s.stale && !s.provisional ? ' <small title="prix en cours de rafraîchissement">~</small>' : ''}</span><a class="lnk" href="${esc(s.link)}" target="_blank" rel="noopener">Comparer sur SCE ↗</a></div>
     <button class="cta" data-app="${s.appid}">${s.cost == null ? '🔎 Voir le détail' : s.cost ? '⇄ Compléter par échange' : '🔨 Crafter le badge (Steam)'}</button></div>
   </article>`).join('') || `<p class="empty">${st.progress.running ? 'Analyse en cours, les sets apparaissent ici au fur et à mesure…' : 'Aucun set ne correspond à ce filtre.'}</p>`;
@@ -176,14 +214,19 @@ function renderDetail() {
   </div>
   ${d.boosters ? `<div class="xsec"><h4>📦 Boosters</h4><div class="bbox"><img src="${esc(d.boosters.img)}" alt=""><div class="grow"><b>${d.boosters.count} booster(s)</b> pour ce jeu<br><small class="mut">3 cartes au hasard — l'ouverture est définitive.</small></div><button class="cta" style="width:auto;padding:10px 18px" data-act="boost">📦 Ouvrir un booster</button></div></div>` : ''}
   <div class="xsec"><h4>Cartes <small class="mut">— coche celles à échanger (panier)</small></h4>
-  <table class="cards"><tr><th></th><th>Carte</th><th>Possédée</th><th>Prix</th><th>Crédits</th><th>Amis</th></tr>${s.cards.map((c) => `
+  <table class="cards"><tr><th></th><th>Carte</th><th>Possédée</th><th>Prix</th><th>Crédits</th><th>Chez le bot</th><th>Amis</th></tr>${s.cards.map((c) => `
     <tr class="${c.owned ? '' : 'miss'} ${basket.has(c.hash) ? 'sel' : ''}"><td>${c.owned ? '' : `<input type="checkbox" data-h="${esc(c.hash)}" ${basket.has(c.hash) ? 'checked' : ''}>`}</td>
     <td><img src="${esc(c.img)}" alt="" loading="lazy"><a class="lnk" href="https://steamcommunity.com/market/listings/753/${encodeURIComponent(c.hash)}" target="_blank" rel="noopener">${esc(c.name)}</a></td>
-    <td>${c.owned ? '× ' + c.owned : '<span class="mut">manquante</span>'}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.credits != null ? c.credits : '–'}</td>
+    <td>${c.owned ? '× ' + c.owned : '<span class="mut">manquante</span>'}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.credits != null ? c.credits : '–'}</td><td>${c.owned ? '' : c.botCard ? (c.botCard.stock > 0 ? `✔ ${c.botCard.stock}${c.botCard.price != null ? ' · ' + c.botCard.price + ' cr' : ''}` : '✖ rupture') : s.botChecked ? '–' : '<span class="mut" title="Pas encore vérifié">?</span>'}</td>
     <td>${c.owned ? '' : (() => { const f = s.friends.filter((x) => x.have.includes(c.hash)); return f.length ? '👥 ' + f.length : '–'; })()}</td></tr>`).join('')}</table></div>
+  <div class="xsec"><h4>🔎 Vérifier ce jeu</h4>
+    <div class="checks">
+      <button class="scan sm" data-act="chkbot"><span class="fill"></span><span class="t"><b>🤖 Le bot a-t-il mes cartes ?</b><small>lit la page du jeu sur SteamCardExchange</small></span><span class="pc">▶</span></button>
+      <button class="scan sm" data-act="chkall"><span class="fill"></span><span class="t"><b>🔄 Vérifier tout ce jeu</b><small>bot carte par carte + prix Steam à jour</small></span><span class="pc">▶</span></button>
+    </div>${(detail.notes || []).map((n) => `<p class="note">⚠ ${esc(n)}</p>`).join('')}</div>
   <div class="xsec"><h4>⇄ Échanges possibles</h4>
     <div class="flist">
-     <div class="frow"><span>🤖</span><div class="grow"><b>${esc(d.bot.name)}</b><br><small>${d.bot.status !== 'ready' ? 'inventaire du bot non chargé (clique sur ↻ à côté de « Bot SteamCardExchange »)' : s.botStock ? `stock : ${s.botStock} carte(s) · ${s.botDistinct}/${s.total} différentes${s.botSets ? ` · ${s.botSets} set(s) complet(s) disponible(s)` : ''} · il te donne ${s.worth} crédit(s) par carte` : 'n\'a aucune carte de ce jeu en stock'}</small></div><a class="ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">Ouvrir sur le site ↗</a></div>
+     <div class="frow"><span>🤖</span><div class="grow"><b>${esc(d.bot.name)}</b><br><small>${s.botChecked ? (s.botHas ? `a ${s.botHas}/${missing.length} de tes cartes manquantes : ${s.cards.filter((c) => !c.owned && c.botCard && c.botCard.stock > 0).map((c) => esc(c.name)).join(', ')}` : 'n\'a aucune de tes cartes manquantes (vérifié carte par carte)') : d.bot.status !== 'ready' ? 'inventaire du bot non chargé : clique sur le bouton « Bot SteamCardExchange » en haut' : s.botStock ? `stock : ${s.botStock} carte(s) · ${s.botDistinct}/${s.total} différentes${s.botSets ? ` · ${s.botSets} set(s) complet(s) disponible(s)` : ''} · il te donne ${s.worth} crédit(s) par carte` : 'n\'a aucune carte de ce jeu en stock'}</small></div><a class="ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">Ouvrir sur le site ↗</a></div>
      ${s.friends.map((f) => `<div class="frow"><img src="${esc(f.avatar || '')}" alt=""><div class="grow"><b>${esc(f.name)}</b><br><small>a ${f.have.length}/${missing.length} : ${f.have.map((h) => esc((s.cards.find((c) => c.hash === h) || {}).name)).join(', ')}</small></div><button class="ghost sm" data-act="selfriend" data-f="${f.steamid}">Sélectionner</button></div>`).join('') || (st.friends.status === 'ready' ? '<p class="mut small">Aucun ami n\'a tes cartes manquantes.</p>' : '<p class="mut small">Scanne tes amis (page Sets) pour voir qui a tes cartes.</p>')}
     </div>
     <div class="row" style="margin-top:10px"><span><button class="ghost sm" data-act="selall">Tout sélectionner (manquantes)</button> <button class="ghost sm" data-act="selnone">Désélectionner</button></span></div></div>
@@ -199,6 +242,10 @@ $('#xbody').addEventListener('click', async (e) => {
   if (act === 'selfriend') { const f = s.friends.find((x) => x.steamid === b.dataset.f); toggleCards(f.have, true); T.friendId = f.steamid; T.pref = 'friend'; }
   if (act === 'trade') { $('#xdlg').close(); openTrade(); }
   if (act === 'boost') openBooster(s.appid, detail.boosters.assetid, s.name, b);
+  if (act === 'chkbot' || act === 'chkall') {
+    try { const d = await fillProgress(b, act === 'chkall' ? 16 : 9, api(`/api/game/${s.appid}/check`, act === 'chkbot' ? { only: 'bot' } : {})); detail = d; renderDetail(); poll(); }
+    catch (err) { toast(err.message, true); b.disabled = false; b.classList.remove('running'); }
+  }
 });
 
 // ---------- connexion Steam (échanges, boosters) ----------
@@ -294,7 +341,8 @@ async function openBooster(appid, assetid, game, btn) {
 }
 let bSig = '', rSig = '';
 function drawBoosters() {
-  const sig = JSON.stringify(st.boosters); if (sig === bSig) return; bSig = sig;
+  $('#gemsbar').innerHTML = st.tasks.gems.doneAt || st.gems.gems || st.gems.sacks ? `<div class="gem"><b>💎 ${nf(st.gems.gems)}</b><small>gemmes en vrac</small></div><div class="gem"><b>🎒 ${nf(st.gems.sacks)}</b><small>sac(s) de 1 000 gemmes</small></div><div class="gem"><b>∑ ${nf(st.gems.gems + st.gems.sacks * 1000)}</b><small>gemmes au total</small></div>` : '<p class="mut">Clique sur le bouton « 💎 Gemmes » en haut pour scanner tes gemmes.</p>';
+  const sig = JSON.stringify([st.boosters, st.gems]); if (sig === bSig) return; bSig = sig;
   $('#bgrid').innerHTML = st.boosters.map((b) => `
   <article class="set"><img class="banner" data-n="${esc(b.game)}" data-detail="${b.appid}" src="${esc(b.banner)}" alt="" onerror="fb(this)"><div class="body"><header><h3 data-detail="${b.appid}">${esc(b.game)}</h3><span class="pill">× ${b.count}</span></header>
     <div class="fan"><img src="${esc(b.img)}" alt="" style="width:96px;height:96px"></div>
@@ -336,14 +384,6 @@ $('#rmetric').onchange = () => { prefs.rankMetric = $('#rmetric').value; savePre
 $('#chips').onclick = (e) => { const b = e.target.closest('.chip'); if (b) { filter = prefs.filter = b.dataset.f; savePrefs(); lastSig = ''; render(); } };
 $('#q').oninput = () => st && draw(); $('#sort').onchange = () => { prefs.sort = $('#sort').value; savePrefs(); st && draw(); };
 $('#refresh').onclick = safe(async () => { const r = await api('/api/refresh', {}); if (r.already) toast('Une analyse est déjà en cours : elle continue.'); lastSig = ''; poll(); });
-$('#botref').onclick = safe(async () => { await api('/api/bot/refresh', {}); poll(); });
-$('#frscan').onclick = safe(async () => { await api('/api/friends/scan', {}); toast('Analyse des amis lancée (en arrière-plan)'); poll(); });
-$('#scebtn').onclick = safe(async () => {
-  const sc = st.credits.sce;
-  if (!sc.available) return toast('La connexion à SteamCardExchange fonctionne dans le logiciel installé.', true);
-  if (!(sc.connected || st.credits.balance != null)) return openSettings();
-  toast('Lecture du solde…'); await api('/api/sce/balance', {}); poll();
-});
 
 // ---------- réglages ----------
 function renderUpdate() {
@@ -375,7 +415,7 @@ const markTheme = () => document.querySelectorAll('.sw').forEach((b) => b.classL
 async function openSettings() {
   const c = await api('/api/settings');
   $('#s_profile').value = c.STEAM_PROFILE; $('#s_key').value = c.STEAM_API_KEY; $('#s_cur').value = c.CURRENCY || '3'; $('#s_acc').value = c.STEAM_ACCOUNT;
-  $('#s_botonly').checked = c.BOT_ONLY !== '0';
+  $('#s_botonly').checked = c.BOT_ONLY !== '0'; $('#s_autocards').checked = c.AUTO_CARDS === '1';
   $('#s_cbal').value = c.CREDITS_BALANCE; $('#s_lb').value = c.LEADERBOARD_URL;
   for (const [id, k] of [['s_pwd', 'STEAM_PASSWORD'], ['s_shared', 'STEAM_SHARED_SECRET'], ['s_ident', 'STEAM_IDENTITY_SECRET']]) { $('#' + id).value = ''; $('#' + id).placeholder = c[k + '_SET'] ? '••••••• (enregistré)' : ''; }
   markTheme(); renderUpdate(); renderSce(); $('#sdlg').showModal();
@@ -384,7 +424,7 @@ $('#ssave').onclick = async (e) => {
   e.preventDefault();
   try {
     await api('/api/settings', { STEAM_PROFILE: $('#s_profile').value, STEAM_API_KEY: $('#s_key').value, CURRENCY: $('#s_cur').value, STEAM_ACCOUNT: $('#s_acc').value,
-      BOT_ONLY: $('#s_botonly').checked ? '1' : '0', CREDITS_BALANCE: $('#s_cbal').value.replace(',', '.'), LEADERBOARD_URL: $('#s_lb').value,
+      BOT_ONLY: $('#s_botonly').checked ? '1' : '0', AUTO_CARDS: $('#s_autocards').checked ? '1' : '0', CREDITS_BALANCE: $('#s_cbal').value.replace(',', '.'), LEADERBOARD_URL: $('#s_lb').value,
       STEAM_PASSWORD: $('#s_pwd').value, STEAM_SHARED_SECRET: $('#s_shared').value, STEAM_IDENTITY_SECRET: $('#s_ident').value });
     $('#sdlg').close(); toast('Réglages enregistrés'); lastSig = ''; glob = null; poll();
   } catch (err) { toast(err.message, true); }

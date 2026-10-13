@@ -56,8 +56,10 @@ function ensureStarted() {
   started = true;
   if (isDemo()) return engine.loadDemo();
   sce.reset();
-  const had = engine.loadSaved(); // affichage immédiat des analyses mémorisées
-  if (!had || !engine.isFresh()) engine.run(cfg());
+  engine.loadSaved(); // affichage immédiat de tout ce qui est en mémoire
+  if (!engine.badgesFresh()) { // au lancement : seule la page de badges du profil est lue ; cartes, boosters, gemmes… se lancent avec les boutons de scan
+    engine.scanBadges(cfg()).then(() => { if (env.AUTO_CARDS === '1' && S.profile) engine.scanCards(cfg()); });
+  } else if (env.AUTO_CARDS === '1' && !engine.isFresh()) engine.scanCards(cfg());
 }
 const settingsView = () => ({ creditsBalance: env.CREDITS_BALANCE, creditsPerCard: env.CREDITS_PER_CARD });
 app.get('/api/state', (_, res) => {
@@ -65,11 +67,24 @@ app.get('/api/state', (_, res) => {
   res.json({ ...engine.snapshot(settingsView()), theme: env.THEME || 'nuit', seenSetup: env.SEEN_SETUP === '1', version: updater ? updater.status().version : null,
     update: updater ? updater.status() : null, leaderboard: { url: !!env.LEADERBOARD_URL, joined: env.LB_JOINED === '1' } });
 });
-app.post('/api/refresh', (_, res) => {
+app.post('/api/refresh', (_, res) => { // « Tout actualiser » : badges puis cartes
   started = true;
   const already = S.running && !isDemo();
   if (isDemo()) engine.loadDemo(); else engine.run(cfg()); // les sets déjà analysés sont relus depuis le cache
   res.json({ ok: true, already });
+});
+// Boutons de scan : chacun lance une tâche indépendante dont la progression est dans /api/state (tasks)
+app.post('/api/scan/:task', (req, res) => {
+  const k = req.params.task, c = cfg();
+  const fn = { badges: () => engine.scanBadges(c), cards: () => engine.scanCards(c), boosters: () => engine.scanBoosters(c), gems: () => engine.scanGems(c),
+    bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance() }[k];
+  if (!fn) return res.status(400).json({ error: 'Scan inconnu' });
+  if (isDemo()) engine.demoScan(k); else Promise.resolve(fn()).catch((e) => { S.error = e.message; });
+  res.json({ ok: true });
+});
+app.post('/api/game/:appid/check', async (req, res) => { // vérification manuelle d'un jeu : stock du bot carte par carte + prix
+  try { res.json(await engine.checkGameAll(Number(req.params.appid), cfg(), Number(env.CREDITS_PER_CARD) || 0, req.body && req.body.only)); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 app.post('/api/update/check', async (_, res) => {
   if (!updater) return res.status(400).json({ error: 'Les mises à jour automatiques ne fonctionnent que dans le logiciel installé (pas en mode développeur).' });
@@ -164,7 +179,7 @@ app.get('/api/game/:appid', async (req, res) => {
 // ---- SteamCardExchange : crédits ----
 app.get('/api/sce/status', (_, res) => res.json(sce.status()));
 app.post('/api/sce/login', async (_, res) => { try { res.json(await sce.login()); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.post('/api/sce/balance', async (_, res) => { try { res.json(await sce.refreshBalance()); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/sce/balance', async (_, res) => { try { await engine.scanBalance(); if (S.tasks.balance.error) throw new Error(S.tasks.balance.error); res.json(sce.status()); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/sce/scan', (_, res) => { engine.refreshBot(); res.json({ ok: true }); }); // relit l'inventaire du bot sur le site
 app.get('/api/sce/debug', (_, res) => res.type('text').send(sce.debug() || 'Aucun diagnostic pour le moment.'));
 
@@ -190,7 +205,7 @@ app.post('/api/trade/send', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-const PUBLIC_KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL', 'THEME', 'BOT_ONLY', 'CREDITS_BALANCE', 'CREDITS_PER_CARD', 'LEADERBOARD_URL'];
+const PUBLIC_KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL', 'THEME', 'BOT_ONLY', 'AUTO_CARDS', 'CREDITS_BALANCE', 'CREDITS_PER_CARD', 'LEADERBOARD_URL'];
 app.get('/api/settings', (_, res) => {
   const out = {};
   for (const k of PUBLIC_KEYS) out[k] = env[k] || '';
