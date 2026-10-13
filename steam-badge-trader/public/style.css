@@ -132,3 +132,18 @@ dialog>form[method=dialog]{position:sticky;top:0;z-index:60;height:0}
 .cbox{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:12px 14px}.cbox h4{margin:0 0 6px}.lc{width:100%;height:auto;display:block}.lcax{display:flex;justify-content:space-between;color:var(--mut);font-size:11px}
 .tgt{display:flex;align-items:center;gap:4px;color:var(--mut);font-size:12px}.tgt input{width:70px;padding:5px 8px}.ok{color:var(--ok,#22c55e)}
 .sec2{margin-top:14px}.cl{margin:0;padding-left:18px;max-height:260px;overflow:auto}.cl li{margin:2px 0}
+/* tuiles : cartes manquantes bien visibles */
+.missrow{margin:6px 0 2px;padding:8px 10px;border-radius:12px;background:color-mix(in srgb,#ef4444 8%,var(--bg2));border:1px dashed color-mix(in srgb,#ef4444 55%,var(--line))}
+.missrow>b{font-size:13px}.mc{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.mcard{position:relative;display:inline-block;width:58px}.mcard img{width:58px;height:58px;object-fit:cover;border-radius:10px;border:3px solid #ef4444;display:block;background:var(--bg2)}
+.mcard i{position:absolute;left:0;right:0;bottom:-2px;text-align:center;font-style:normal;font-size:10px;background:#000a;color:#fff;border-radius:0 0 8px 8px;padding:1px 0;min-height:13px}
+.mcard.cbot img{border-color:var(--cbot)}.mcard.cfr img{border-color:var(--cfr)}.mcard.both img{border-color:var(--cbot);box-shadow:0 0 0 3px var(--cfr)}
+.cnt{display:flex;flex-wrap:wrap;gap:6px;font-size:12px}.cnt .c{padding:2px 8px;border-radius:99px;border:1px solid var(--line)}
+.cnt .miss{border-color:#ef4444;color:#fca5a5}.cnt .bot{border-color:var(--cbot)}.cnt .fr{border-color:var(--cfr)}
+/* mode auto */
+.agrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;margin-top:8px}.alist{max-height:420px;overflow:auto}
+.agame{margin:0 0 10px}.arow{display:flex;align-items:center;gap:8px;padding:6px;border-radius:10px;border:1px solid transparent;cursor:pointer}.arow.sel{border-color:var(--ac);background:color-mix(in srgb,var(--ac) 10%,transparent)}
+.arow img{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none}.chip.on{outline:2px solid var(--tx)}
+.trade{border:1px solid var(--line);border-radius:14px;padding:12px;margin:0 0 10px;background:var(--bg2)}.trade.no{border-color:#f59e0b}
+.tcols{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:8px 0}.tc{display:flex;flex-wrap:wrap;gap:6px}
+.tcard{display:inline-flex;flex-direction:column;align-items:center;width:64px;text-align:center}.tcard img{width:56px;height:56px;border-radius:8px;object-fit:cover}.tcard small{font-size:10px;color:var(--mut);max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

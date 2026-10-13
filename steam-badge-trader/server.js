@@ -105,6 +105,9 @@ setInterval(() => {
   config.save(DATA_DIR, { SCHED_LAST: todayStr() }); reloadEnv(); // « fait aujourd'hui » avant de commencer : pas de double lancement
   runScheduled().catch(() => {});
 }, 60e3).unref();
+app.get('/api/auto/data', (_, res) => { try { res.json(engine.autoData()); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/auto/plan', (req, res) => { try { res.json(engine.autoPlan(req.body.asks || [], req.body.gives || [])); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/auto/open', (req, res) => { try { res.json(sce.openGame(Number(req.body.appid), req.body.names || [])); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.get('/api/goal', (req, res) => { try { res.json(engine.goalPlan(req.query.level)); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.get('/api/spare', (_, res) => { try { res.json(engine.spareReport()); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/event/add', (req, res) => { try { engine.eventAdd(req.body.name, req.body.start, req.body.end); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });

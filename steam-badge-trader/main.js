@@ -33,7 +33,29 @@ const updater = autoUpdater && {
 };
 
 // ---- SteamCardExchange : fenêtre de connexion + lecture du texte des pages (session persistante) ----
+// Exécuté dans la page du bot : surligne les cartes à prendre et affiche un bandeau
+function highlightCards(names) {
+  const norm = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const want = new Set(names.map(norm));
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;z-index:99999;left:0;right:0;top:0;padding:10px 16px;background:#16a34a;color:#fff;font:600 14px sans-serif;box-shadow:0 2px 12px #0008';
+  bar.textContent = 'Cartes à prendre : ' + names.join(' · ') + ' — clique sur « Quick-Trade » à côté de chaque carte surlignée';
+  document.body.appendChild(bar);
+  let first = true;
+  for (const e of document.querySelectorAll('body *')) {
+    if (e.children.length || !e.textContent || !want.has(norm(e.textContent))) continue;
+    let box = e;
+    for (let i = 0; i < 5 && box.parentElement; i++) { box = box.parentElement; if (/quick-?trade/i.test(box.innerText || '') && (box.innerText || '').length < 400) break; }
+    box.style.outline = '4px solid #22c55e'; box.style.background = '#22c55e22';
+    if (first) { box.scrollIntoView({ block: 'center' }); first = false; }
+  }
+}
 const sceBridge = {
+  openGame(url, names) {
+    const w = new BrowserWindow({ width: 1200, height: 900, title: 'SteamCardExchange — cartes à prendre', webPreferences: { partition: 'persist:sce' }, autoHideMenuBar: true });
+    w.loadURL(url);
+    w.webContents.on('did-finish-load', () => { setTimeout(() => w.webContents.executeJavaScript(`(${highlightCards.toString()})(${JSON.stringify(names)})`).catch(() => {}), 1800); });
+  },
   fetch: (url) => session.fromPartition('persist:sce').fetch(url, { credentials: 'include', headers: { 'Accept-Language': 'en' } }), // requêtes avec ta session Steam
   open: () => new Promise((resolve) => {
     const w = new BrowserWindow({ width: 1100, height: 800, title: 'SteamCardExchange — connecte-toi avec Steam puis ferme cette fenêtre', webPreferences: { partition: 'persist:sce' }, autoHideMenuBar: true });

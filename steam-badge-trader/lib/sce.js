@@ -39,6 +39,15 @@ function findCredits(text) {
   return out;
 }
 
+// Historique des échanges avec le bot (page Profile) : « ID  date - heure  crédits avant  tes cartes  cartes du bot  crédits après  statut »
+function parseTrades(text) {
+  const out = [];
+  for (const l of String(text).split('\n')) {
+    const m = /^\s*(\d{6,})\s+(\d{2})\.(\d{2})\.(\d{4})\s*-\s*(\d{2}):(\d{2})\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+|-+)\s+(\w+)/.exec(l);
+    if (m) out.push({ id: m[1], t: Date.UTC(+m[4], +m[3] - 1, +m[2], +m[5], +m[6]), before: +m[7], yours: +m[8], bots: +m[9], after: /^\d/.test(m[10]) ? +m[10] : null, status: m[11] });
+  }
+  return out;
+}
 const OUT = /logout|log ?out|sign ?out|déconnex/i;
 async function refreshBalance() {
   if (!bridge) throw new Error(NO_SITE);
@@ -49,6 +58,7 @@ async function refreshBalance() {
   d.candidates = findCredits(prof.text).slice(0, 8);
   const pick = d.candidates.find((c) => /\d\s*credits/i.test(c.ctx)) || d.candidates[0]; // « 15 CREDITS » affiché sous ton pseudo
   if (pick) { d.balance = pick.value; d.balanceT = Date.now(); d.connected = true; }
+  d.trades = parseTrades(prof.text);
   d.debug = `CONNECTÉ: ${d.connected}\n\n--- PAGE PROFILE (début)\n${prof.text.slice(0, 3500)}\n\nVALEURS TROUVÉES: ${JSON.stringify(d.candidates)}`;
   save();
   return status();
@@ -161,6 +171,7 @@ function parseGameRows(rows, head) {
 //   NOM / Stock: 1 (Last Card) / Worth (You Get): 6c / Price (You Pay): 9c (ou « - ») / Quick-Trade | Not available
 function parseGameText(text) {
   const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  let qn = 0;
   const out = {}, val = (l) => { const m = /(\d+(?:[.,]\d+)?)\s*c\b/i.exec(l); return m ? num(m[1]) : null; };
   for (let i = 1; i < lines.length; i++) {
     const m = /^stock\s*:\s*(\d+)/i.exec(lines[i]);
@@ -173,7 +184,7 @@ function parseGameText(text) {
       else if (/quick-?trade/i.test(lines[j])) quick = true;
     }
     if (!name || /^(worth|price|stock)/i.test(name)) continue;
-    out[norm(name)] = { stock: Number(m[1]), price, worth, quick, last: /last card/i.test(lines[i]), name };
+    out[norm(name)] = { stock: Number(m[1]), price, worth, quick, last: /last card/i.test(lines[i]), name, qi: quick ? qn++ : -1 };
   }
   return out;
 }
@@ -185,15 +196,24 @@ async function checkGame(appid) {
   let cards = parseGameRows(rows, head);
   const fromText = parseGameText(r.text); // le site actuel affiche des blocs de texte, pas un tableau
   if (Object.keys(fromText).length >= Object.keys(cards).length) cards = fromText;
+  // liens « Quick-Trade » : le n-ième lien correspond à la n-ième carte qui en a un (même ordre que dans la page)
+  const qlinks = (r.links || []).filter((l) => /quick-?trade/i.test(l.t || '')).map((l) => l.h), qcards = Object.values(cards).filter((c) => c.qi >= 0);
+  if (qlinks.length && qlinks.length === qcards.length) for (const c of qcards) c.tradeUrl = qlinks[c.qi];
   d.games = d.games || {};
   d.games[appid] = { t: Date.now(), cards };
-  d.debug = `PAGE JEU ${appid}\nEN-TÊTES: ${JSON.stringify(head)}\nLIGNES: ${rows.length}\nEXEMPLES: ${JSON.stringify(rows.slice(0, 3))}\nRÉSULTAT: ${JSON.stringify(cards).slice(0, 800)}\n\n--- TEXTE\n${String(r.text || '').slice(0, 1500)}`;
+  d.debug = `PAGE JEU ${appid}\nEN-TÊTES: ${JSON.stringify(head)}\nLIGNES: ${rows.length}\nEXEMPLES: ${JSON.stringify(rows.slice(0, 3))}\nLIENS D'ÉCHANGE: ${JSON.stringify((r.links || []).filter((l) => /trade|offer|quick/i.test((l.t || '') + l.h)).slice(0, 10))}\nRÉSULTAT: ${JSON.stringify(cards).slice(0, 800)}\n\n--- TEXTE\n${String(r.text || '').slice(0, 1500)}`;
   save();
   if (!Object.keys(cards).length) throw new Error('Page du jeu illisible côté bot : copie le diagnostic dans les Réglages.');
   return cards;
 }
 const demoGame = (appid, names) => { D.games = D.games || {}; D.games[appid] = { t: Date.now(), cards: Object.fromEntries(names.map((n, i) => [norm(n), { stock: i % 3, price: 7 + (i % 4), worth: 3 }])) }; };
 const gameData = (appid) => (load().games || {})[appid] || null;
+// Ouvre la page du jeu chez le bot dans une fenêtre (déjà connectée) avec les cartes voulues surlignées
+function openGame(appid, names) {
+  const url = gameUrl(appid);
+  if (bridge && bridge.openGame) { bridge.openGame(url, names || []); return { opened: true, url }; }
+  return { opened: false, url };
+}
 const gameUrl = (appid) => `${HOME}index.php?inventorygame-appid-${appid}`;
 const gameAge = (appid) => { const g = gameData(appid); return g ? Date.now() - g.t : Infinity; };
 const hasGame = (appid) => { const g = gameData(appid); return !!g && Object.keys(g.cards).length > 0; };
@@ -204,8 +224,9 @@ const cardInfo = (appid, name) => {
   return hit ? g.cards[hit] : null;
 };
 
+const trades = () => load().trades || [];
 const status = () => { const d = load(); return { available: !!bridge || demoOn, connected: d.connected, balance: d.balance, balanceT: d.balanceT, candidates: d.candidates,
   games: index().stocked, invAge: d.inv ? d.inv.t : 0, hasDebug: !!d.debug }; };
 const debug = () => load().debug || '';
 const reset = () => { if (demoOn) { demoOn = false; D = null; } };
-module.exports = { setBridge, login, refreshBalance, readInventory, readBadgePrices, badgePrice, checkGame, parseGameText, gameUrl, gameAge, demoGame, hasGame, cardInfo, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };
+module.exports = { setBridge, login, refreshBalance, readInventory, readBadgePrices, badgePrice, checkGame, parseGameText, parseTrades, trades, openGame, gameUrl, gameAge, demoGame, hasGame, cardInfo, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };
