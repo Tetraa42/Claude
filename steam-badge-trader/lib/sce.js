@@ -212,9 +212,9 @@ async function checkGame(appid) {
 const demoGame = (appid, names) => { D.games = D.games || {}; D.games[appid] = { t: Date.now(), cards: Object.fromEntries(names.map((n, i) => [norm(n), { stock: i % 3, price: 7 + (i % 4), worth: 3 }])) }; };
 const gameData = (appid) => (load().games || {})[appid] || null;
 // Ouvre la page du jeu chez le bot dans une fenêtre (déjà connectée) avec les cartes voulues surlignées
-function openGame(appid, names) {
-  const url = gameUrl(appid);
-  if (bridge && bridge.openGame) { bridge.openGame(url, names || []); return { opened: true, url }; }
+function openGame(appid, names, mode) {
+  const url = mode === 'sell' ? PROFILE_URL : gameUrl(appid); // vente : la page Profile a le bouton « Make Offer »
+  if (bridge && bridge.openGame) { bridge.openGame(url, names || [], mode || 'buy'); return { opened: true, url }; }
   return { opened: false, url };
 }
 const gameUrl = (appid) => `${HOME}index.php?inventorygame-appid-${appid}`;

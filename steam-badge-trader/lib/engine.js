@@ -15,7 +15,7 @@ const S = {
   sets: [], wishlist: [], alerts: [], history: [], completed: [], drops: new Map(), updatedAt: 0, demo: false, currency: 3, botOnly: true,
   bot: { status: 'idle', error: null, name: 'SteamCardExchange', count: 0, games: 0, t: 0 },
   retry: { at: 0, n: 0 }, gems: { gems: 0, sacks: 0 }, invT: 0, catalog: { t: 0, gems: { total: 0, tradable: 0, untradable: 0 }, map: {} }, gemVal: {},
-  tasks: Object.fromEntries(['badges', 'cards', 'boosters', 'gems', 'bot', 'friends', 'balance', 'verify'].map((k) => [k, { state: 'idle', pct: 0, label: '', eta: null, estSec: 0, timeBased: false, t0: 0, doneAt: 0, error: null }])),
+  tasks: Object.fromEntries(['badges', 'cards', 'boosters', 'gems', 'bot', 'friends', 'balance', 'verify', 'prices'].map((k) => [k, { state: 'idle', pct: 0, label: '', eta: null, estSec: 0, timeBased: false, t0: 0, doneAt: 0, error: null }])),
   friends: { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map(), all: new Map(), log: {} },
   rank: { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0, badges: new Map() },
   journal: [], events: null,
@@ -478,6 +478,23 @@ async function scanVerify(opt) {
   S.tasks.verify.note = failed ? `${failed} page(s) illisible(s)` : null; finish('verify'); saveState();
 }
 
+// ---------- 💱 prix d'achat et de rachat du site pour les cartes que tu as ----------
+async function scanPrices() {
+  if (running('prices')) return;
+  const gen = bump('prices'), list = S.sets.filter((s) => !s.provisional && s.ownedUnique > 0 && !verified(s.appid)).sort((a, b) => b.dupes - a.dupes).slice(0, 200);
+  begin('prices', `Prix du site : 0/${list.length}`);
+  let done = 0, failed = 0;
+  for (const s of list) {
+    if (gens.prices !== gen) return;
+    try { if (S.demo) { await steam.sleep(250); sce.demoGame(s.appid, s.cards.map((c) => c.name)); } else await sce.checkGame(s.appid); } catch { failed++; }
+    done++; prog('prices', (100 * done) / list.length, `Prix du site : ${done}/${list.length}`);
+    S.tasks.prices.eta = Math.ceil((list.length - done) * (S.demo ? 0.3 : 5));
+  }
+  if (gens.prices !== gen) return;
+  if (list.length && failed === list.length) { finish('prices', 'Aucune page de jeu lisible : connecte-toi au site dans les Réglages (section SteamCardExchange).'); return; }
+  S.tasks.prices.note = failed ? `${failed} page(s) illisible(s)` : null; finish('prices'); saveState();
+}
+
 // ---------- bouton « prêt à échanger » : conditions + plan d'échanges ----------
 function readiness() {
   const T = S.tasks, ok = (k) => T[k].doneAt > 0 && T[k].state !== 'error';
@@ -720,8 +737,19 @@ function autoData() {
   }).sort((a, b) => b.worth - a.worth);
   return { balance: bal, wanted, give, botDupes, verified: S.tasks.verify.doneAt, friendsAge: S.friends.t || 0 };
 }
+
+// Vente au bot : les cartes choisies (rien de choisi = aucune vente) par paquets de 6 au maximum, les plus chères d'abord
+function sellPlan(giveIds) {
+  const data = autoData(), sel = new Set((giveIds || []).map(String)), pick = data.give.filter((g) => sel.has(String(g.assetid))).sort((a, b) => b.worth - a.worth), trades = [];
+  for (let i = 0; i < pick.length; i += MAXC) {
+    const chunk = pick.slice(i, i + MAXC), total = +chunk.reduce((t, g) => t + (g.worth || 0), 0).toFixed(2);
+    trades.push({ id: 's' + i, kind: 'sell', asks: [], gives: chunk.map((g) => ({ assetid: g.assetid, name: g.name, img: g.img, game: g.game, worth: g.worth, over: false })), askTotal: 0, giveTotal: total, balanceAfter: +(data.balance + total).toFixed(2), feasible: total > 0, short: 0, games: [] });
+  }
+  return { balance: data.balance, trades, total: +trades.reduce((t, x) => t + x.giveTotal, 0).toFixed(2), count: pick.length };
+}
 // asks : [{ hash, src: 'bot' | steamid }] · giveIds : assetids choisis (vide = choix automatique)
-function autoPlan(asks, giveIds) {
+function autoPlan(asks, giveIds, mode) {
+  if (mode === 'sell') return sellPlan(giveIds);
   const data = autoData(), byHash = new Map(data.wanted.map((w) => [w.hash, w])), sel = new Set((giveIds || []).map(String));
   const pool = (sel.size ? data.give.filter((g) => sel.has(String(g.assetid))) : data.give.filter((g) => g.spare)).filter((g) => g.worth > 0 || g.price > 0); // rien de coché : tes doublons ; sinon exactement les cartes choisies (n'importe laquelle de tes cartes)
   let bal = data.balance; const trades = [];
@@ -901,4 +929,4 @@ function spareCards() {
   }
   return out;
 }
-module.exports = { S, friendNeeds, autoData, autoPlan, goalPlan, spareReport, eventAdd, eventRemove, compareFriend, rareTargets, journalAdd, journalRemove, deals, wishTarget, alertSet, exportData, importData, setsCsv, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };
+module.exports = { S, scanPrices, friendNeeds, autoData, autoPlan, goalPlan, spareReport, eventAdd, eventRemove, compareFriend, rareTargets, journalAdd, journalRemove, deals, wishTarget, alertSet, exportData, importData, setsCsv, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };

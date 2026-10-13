@@ -76,11 +76,11 @@ app.post('/api/refresh', (_, res) => { // « Tout actualiser » : badges puis ca
 });
 // Boutons de scan : chacun lance une tâche indépendante dont la progression est dans /api/state (tasks)
 const scanFn = (k) => { const c = cfg(); return { badges: () => engine.scanBadges(c), cards: () => engine.scanCards(c), boosters: () => engine.scanBoosters(c), gems: () => engine.scanGems(c),
-  bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance(), verify: () => engine.scanVerify({ cfg: c }) }[k]; };
+  bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance(), verify: () => engine.scanVerify({ cfg: c }), prices: () => engine.scanPrices() }[k]; };
 app.post('/api/scan/:task', (req, res) => {
   const k = req.params.task, fn = scanFn(k);
   if (!fn) return res.status(400).json({ error: 'Scan inconnu' });
-  if (isDemo() && !['verify', 'friends'].includes(k)) engine.demoScan(k); else Promise.resolve(fn()).catch((e) => { S.error = e.message; });
+  if (isDemo() && !['verify', 'friends', 'prices'].includes(k)) engine.demoScan(k); else Promise.resolve(fn()).catch((e) => { S.error = e.message; });
   res.json({ ok: true });
 });
 // ---- planificateur : lance les scans choisis une fois par jour à l'heure indiquée (l'app doit être ouverte) ----
@@ -106,8 +106,8 @@ setInterval(() => {
   runScheduled().catch(() => {});
 }, 60e3).unref();
 app.get('/api/auto/data', (_, res) => { try { res.json(engine.autoData()); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.post('/api/auto/plan', (req, res) => { try { res.json(engine.autoPlan(req.body.asks || [], req.body.gives || [])); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.post('/api/auto/open', (req, res) => { try { res.json(sce.openGame(Number(req.body.appid), req.body.names || [])); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/auto/plan', (req, res) => { try { res.json(engine.autoPlan(req.body.asks || [], req.body.gives || [], req.body.mode)); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/auto/open', (req, res) => { try { res.json(sce.openGame(Number(req.body.appid), (req.body.names || []).map(String).slice(0, 60), req.body.mode === 'sell' ? 'sell' : 'buy')); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.get('/api/friends/needs', (_, res) => { try { res.json(engine.friendNeeds()); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/botcheck', (_, res) => { if (isDemo()) { Promise.resolve(engine.scanVerify({ all: true, force: true, cfg: cfg() })).catch(() => {}); } else Promise.resolve(engine.scanVerify({ all: true, force: true, cfg: cfg() })).catch((e) => { S.error = e.message; }); res.json({ ok: true }); });
 app.get('/api/goal', (req, res) => { try { res.json(engine.goalPlan(req.query.level)); } catch (e) { res.status(400).json({ error: e.message }); } });
@@ -156,6 +156,7 @@ app.post('/api/update/install', (_, res) => { if (!updater) return res.status(40
 // ---- boosters ----
 app.post('/api/boosters/open', async (req, res) => {
   try {
+    if (req.body.confirmed !== true) throw new Error('Ouverture non validée.');
     const { assetid, appid } = req.body;
     if (isDemo()) return res.json({ cards: ['Héros', 'Mage', 'Dragon'].map((n, i) => ({ name: n, img: `/art/${appid}/${i}.svg`, foil: false })), left: 0 });
     const cards = await trader.openBooster(Number(appid), assetid);
@@ -187,6 +188,7 @@ app.post('/api/gems/value', async (req, res) => {
 app.post('/api/gems/craft', async (req, res) => {
   try {
     const appid = Number(req.body.appid), cat = S.catalog.map[appid];
+    if (req.body.confirmed !== true) throw new Error('Fabrication non validée : confirme-la dans l\'application.');
     if (isDemo()) { if (cat) { if (S.catalog.gems.total < cat.price) throw new Error(`Pas assez de gemmes : il en faut ${cat.price}, tu en as ${S.catalog.gems.total}.`); S.catalog.gems.total -= cat.price; } return res.json({ ok: true, totalGems: S.catalog.gems.total, demo: true }); }
     if (!cat) throw new Error('Prix inconnu : charge d\'abord le catalogue de boosters.');
     if (cat.unavailable) throw new Error('Ce booster n\'est pas disponible pour le moment (délai après une fabrication).');
@@ -288,6 +290,7 @@ app.post('/api/trade/login', async (req, res) => {
 app.post('/api/trade/send', async (req, res) => {
   try {
     const { source, tradeUrl, friendId, give, ask } = req.body;
+    if (req.body.confirmed !== true) throw new Error('Échange non validé : aucune offre n\'est envoyée sans ta validation sur la page de confirmation.');
     if (isDemo()) return res.json({ id: '000000', status: 'sent', note: 'Mode démo : aucune offre réelle envoyée.' });
     if (!Array.isArray(give)) throw new Error('Liste de cartes à donner invalide.');
     if (!Array.isArray(ask) || (!ask.length && !(req.body.gift && give.length))) throw new Error('Rien à demander : aucune carte manquante chez cette source.');

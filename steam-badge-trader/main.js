@@ -33,28 +33,50 @@ const updater = autoUpdater && {
 };
 
 // ---- SteamCardExchange : fenêtre de connexion + lecture du texte des pages (session persistante) ----
-// Exécuté dans la page du bot : surligne les cartes à prendre et affiche un bandeau
-function highlightCards(names) {
+// Pages Steam / SteamCardExchange : ouvertes dans une fenêtre de l'application (avec ta session déjà connectée), le reste dans le navigateur
+const APP_HOSTS = /(^|\.)(steamcommunity\.com|steampowered\.com|steamcardexchange\.net)$/i;
+function openInApp(url, title) {
+  const w = new BrowserWindow({ width: 1200, height: 900, title: title || 'Steam', webPreferences: { partition: 'persist:sce' }, autoHideMenuBar: true });
+  w.webContents.setWindowOpenHandler(({ url: u }) => routeUrl(u, w));
+  w.loadURL(url);
+  return w;
+}
+function routeUrl(u, from) {
+  let host = '', proto = '';
+  try { const x = new URL(u); host = x.hostname; proto = x.protocol; } catch { return { action: 'deny' }; }
+  if ((proto === 'https:' || proto === 'http:') && APP_HOSTS.test(host)) { if (from) from.loadURL(u); else openInApp(u); return { action: 'deny' }; }
+  if (proto === 'https:' || proto === 'http:' || proto === 'steam:') shell.openExternal(u);
+  return { action: 'deny' };
+}
+// Exécuté dans la page du bot : panneau avec un bouton par carte (un clic = « Quick-Trade » de cette carte) ; rien n'est cliqué sans toi
+function highlightCards(names, mode) {
   const norm = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, '');
-  const want = new Set(names.map(norm));
   const bar = document.createElement('div');
-  bar.style.cssText = 'position:fixed;z-index:99999;left:0;right:0;top:0;padding:10px 16px;background:#16a34a;color:#fff;font:600 14px sans-serif;box-shadow:0 2px 12px #0008';
-  bar.textContent = 'Cartes à prendre : ' + names.join(' · ') + ' — clique sur « Quick-Trade » à côté de chaque carte surlignée';
+  bar.style.cssText = 'position:fixed;z-index:99999;right:12px;top:12px;width:340px;max-height:85vh;overflow:auto;padding:12px;background:#0f172af2;color:#fff;font:13px/1.4 sans-serif;border:2px solid #22c55e;border-radius:12px;box-shadow:0 8px 30px #000a';
+  const title = document.createElement('div'); title.style.cssText = 'font-weight:700;margin-bottom:8px';
+  title.textContent = mode === 'sell' ? 'Cartes à vendre au bot (Make Offer)' : 'Cartes à prendre — un clic = Quick-Trade de la carte'; bar.appendChild(title);
   document.body.appendChild(bar);
-  let first = true;
-  for (const e of document.querySelectorAll('body *')) {
-    if (e.children.length || !e.textContent || !want.has(norm(e.textContent))) continue;
-    let box = e;
-    for (let i = 0; i < 5 && box.parentElement; i++) { box = box.parentElement; if (/quick-?trade/i.test(box.innerText || '') && (box.innerText || '').length < 400) break; }
-    box.style.outline = '4px solid #22c55e'; box.style.background = '#22c55e22';
-    if (first) { box.scrollIntoView({ block: 'center' }); first = false; }
+  const row = (txt, ok, fn) => { const b = document.createElement('button'); b.textContent = txt; b.disabled = !fn; b.style.cssText = 'display:block;width:100%;margin:4px 0;padding:8px;border-radius:8px;border:1px solid ' + (ok ? '#22c55e' : '#64748b') + ';background:' + (ok ? '#14532d' : '#1e293b') + ';color:#fff;cursor:' + (fn ? 'pointer' : 'default') + ';text-align:left'; if (fn) b.onclick = () => fn(b); bar.appendChild(b); return b; };
+  if (mode === 'sell') {
+    for (const n of names) { const d = document.createElement('div'); d.textContent = '• ' + n; bar.appendChild(d); }
+    const note = document.createElement('div'); note.style.cssText = 'margin-top:8px;color:#94a3b8'; note.textContent = 'Clique sur « Make Offer », choisis ces cartes dans ton inventaire puis valide.'; bar.appendChild(note);
+    return;
   }
+  const want = new Map(names.map((n) => [norm(n), n])), done = new Set();
+  for (const e of document.querySelectorAll('body *')) {
+    if (e.children.length || !e.textContent) continue;
+    const k = norm(e.textContent); if (!want.has(k) || done.has(k)) continue;
+    let box = e, btn = null;
+    for (let i = 0; i < 6 && box.parentElement; i++) { box = box.parentElement; btn = [...box.querySelectorAll('a,button')].find((x) => /quick-?trade/i.test(x.textContent || '')); if (btn && (box.innerText || '').length < 500) break; btn = null; }
+    done.add(k); box.style.outline = '4px solid #22c55e'; box.style.background = '#22c55e22';
+    row((btn ? '⚡ Quick-Trade — ' : '⚠ bouton introuvable — ') + want.get(k), !!btn, btn ? (b) => { btn.click(); b.textContent = '✔ demandé — ' + want.get(k); b.disabled = true; } : null);
+  }
+  for (const [k, n] of want) if (!done.has(k)) row('⚠ carte introuvable sur la page — ' + n, false, null);
 }
 const sceBridge = {
-  openGame(url, names) {
-    const w = new BrowserWindow({ width: 1200, height: 900, title: 'SteamCardExchange — cartes à prendre', webPreferences: { partition: 'persist:sce' }, autoHideMenuBar: true });
-    w.loadURL(url);
-    w.webContents.on('did-finish-load', () => { setTimeout(() => w.webContents.executeJavaScript(`(${highlightCards.toString()})(${JSON.stringify(names)})`).catch(() => {}), 1800); });
+  openGame(url, names, mode) {
+    const w = openInApp(url, 'SteamCardExchange');
+    w.webContents.on('did-finish-load', () => { setTimeout(() => w.webContents.executeJavaScript(`(${highlightCards.toString()})(${JSON.stringify(names)}, ${JSON.stringify(mode || 'buy')})`).catch(() => {}), 1800); });
   },
   fetch: (url) => session.fromPartition('persist:sce').fetch(url, { credentials: 'include', headers: { 'Accept-Language': 'en' } }), // requêtes avec ta session Steam
   open: () => new Promise((resolve) => {
@@ -92,7 +114,8 @@ async function createWindow() {
   const port = await server.start(38217); // port fixe si possible (préférences conservées), sinon un port libre
   win = new BrowserWindow({ width: 1320, height: 900, minWidth: 900, minHeight: 600, backgroundColor: '#0b1220',
     title: 'Steam Badge Trader', icon: path.join(__dirname, 'build', 'icon.png'), autoHideMenuBar: true });
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' }; });
+  win.webContents.setWindowOpenHandler(({ url }) => routeUrl(url, null));
+  win.on('closed', () => { for (const w of BrowserWindow.getAllWindows()) { try { w.destroy(); } catch {} } }); // les fenêtres de pages Steam se ferment avec la fenêtre principale
   win.loadURL(`http://127.0.0.1:${port}/`);
   if (autoUpdater) setTimeout(() => autoUpdater.checkForUpdates().catch(() => {}), 8000); // simple vérification discrète au démarrage
 }

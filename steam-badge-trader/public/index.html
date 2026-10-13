@@ -18,9 +18,14 @@
 
   <section id="v-sets">
     <div class="bar"><h2 id="h2">Sets à compléter</h2>
-      <div class="tools"><div class="search"><input id="q" placeholder="Rechercher un jeu…"><button id="qx" class="qx" hidden aria-label="Effacer la recherche" title="Effacer">✕</button></div><select id="sort"><option value="cost">Trier : moins cher</option><option value="missing">Trier : moins de cartes manquantes</option><option value="pct">Trier : % complété</option><option value="name">Trier : nom</option></select>
+      <div class="tools"><div class="search"><input id="q" placeholder="Rechercher un jeu…"><button id="qx" class="qx" hidden aria-label="Effacer la recherche" title="Effacer">✕</button></div><label class="selbox">🔽 <select id="filt" title="Filtrer la liste"></select></label><label class="selbox">↕ <select id="sort" title="Trier la liste">
+        <optgroup label="Prix"><option value="cost">Moins cher d'abord</option><option value="costdesc">Plus cher d'abord</option></optgroup>
+        <optgroup label="Avancement"><option value="missing">Le moins de cartes manquantes</option><option value="missingdesc">Le plus de cartes manquantes</option><option value="pct">% complété (haut)</option><option value="pctasc">% complété (bas)</option><option value="owned">Le plus de cartes possédées</option></optgroup>
+        <optgroup label="Doublons et valeur"><option value="dupes">Le plus de doublons</option><option value="dupval">Doublons : plus de crédits</option></optgroup>
+        <optgroup label="Disponibilité"><option value="bothas">Le plus de manquantes chez le bot</option><option value="friends">Le plus de manquantes chez mes amis</option><option value="nobody">Le plus de cartes introuvables</option></optgroup>
+        <optgroup label="Badge"><option value="level">Niveau de badge (haut)</option><option value="levelasc">Niveau de badge (bas)</option><option value="drops">Cartes à récupérer en jouant</option></optgroup>
+        <optgroup label="Nom"><option value="name">A → Z</option><option value="namedesc">Z → A</option></optgroup></select></label>
       </div></div>
-    <div class="chips" id="chips"></div>
     <div class="meta" id="meta"></div>
     <section id="grid" class="grid"></section>
   </section>
@@ -70,6 +75,8 @@
 </main>
 
 <div id="basket" hidden><span id="bk"></span><span class="grow"></span><button id="bkview" class="ghost">👁 Voir le panier</button><button id="bkgo" class="ghost">⇄ Lancer l'échange</button><button id="bkclear" class="ghost sm">Vider</button></div>
+
+<dialog id="cfdlg" class="wide-dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form><h3 id="cft">Vérifie et valide l'échange</h3><div id="cfbody"></div></dialog>
 
 <dialog id="bkdlg" class="wide-dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form><h3>🛒 Mon panier</h3><div id="bkbody"></div></dialog>
 

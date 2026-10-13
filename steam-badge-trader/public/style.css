@@ -203,3 +203,16 @@ details.cbox>summary{cursor:pointer}
 .fc2.give img{border-color:#22c55e}.fc2.need img{border-color:var(--cfr)}.fc2.has img{opacity:.5}.fc2.lack img{border-color:#ef4444}
 .legend .give:before{background:#22c55e}.legend .need:before{background:var(--cfr)}.legend .lack:before{background:#ef4444}.legend .has:before{background:var(--mut)}
 .addbk{margin-top:6px}.addbk.on{border-color:var(--ok);color:var(--ok)}.cost b{color:var(--tx)}
+/* éventail : toutes les cartes (possédées ou manquantes) ont exactement la même taille ; la couleur est un contour intérieur */
+.fan{align-items:flex-start}
+.fan>img,.fan>.fc,.fan>.fc2,.fan>.ph{flex:0 1 76px;width:76px;min-width:0;margin-left:-8px;aspect-ratio:1/1;box-sizing:border-box}
+.fan>img{border:2px solid var(--bg);border-radius:10px;object-fit:cover}
+.fan>.fc img,.fan>.fc2 img{display:block;width:100%;height:100%;aspect-ratio:1/1;object-fit:cover;margin:0;border:2px solid var(--bg);border-radius:10px;outline:3px solid #ef4444;outline-offset:-3px;opacity:1;filter:none;box-shadow:0 6px 14px #0008}
+.fan>.fc.cbot img{outline-color:var(--cbot)}.fan>.fc.cfr img{outline-color:var(--cfr)}.fan>.fc.both img{outline-color:var(--cbot);box-shadow:0 0 0 3px var(--cfr),0 6px 14px #0008}
+.fan>.fc.wished img{box-shadow:0 0 0 2px #facc15,0 6px 14px #0008}
+.fan>.fc2.give img{outline-color:#22c55e}.fan>.fc2.need img{outline-color:var(--cfr)}.fan>.fc2.has img{outline-color:var(--line);opacity:.5}.fan>.fc2.lack img{outline-color:#ef4444}
+.selbox{display:inline-flex;align-items:center;gap:4px;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:0 8px}.selbox select{background:transparent;border:0;color:var(--tx);font:inherit;padding:9px 4px;max-width:280px}
+.modebar{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.modebar button.on{background:linear-gradient(90deg,var(--ac),var(--ac2));color:var(--on);border-color:transparent;font-weight:700}
+.atool{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}.atool input{flex:1;min-width:120px;padding:7px 10px}.atool select{padding:7px 8px;background:var(--bg2);color:var(--tx);border:1px solid var(--line);border-radius:10px;font:inherit}
+.cfgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:10px 0}.cfcol h4{margin:0 0 6px}.cfsum{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0}
+@media (max-width:700px){.cfgrid{grid-template-columns:1fr}}
