@@ -89,7 +89,7 @@ async function getBadgeStats(key, id) {
     level: r.player_level || 0, xp, badgeCount: all.length,
     rareCount: all.filter((b) => b.scarcity > 0 && b.scarcity < 10000).length,
     rarity: +all.reduce((t, b) => t + rarityPoints(b.scarcity), 0).toFixed(1),
-    badges: all.filter((b) => b.appid && b.border_color === 0).map((b) => ({ appid: b.appid, level: b.level, xp: b.xp })),
+    badges: all.filter((b) => b.appid && b.border_color === 0).map((b) => ({ appid: b.appid, level: b.level, xp: b.xp, scarcity: b.scarcity || 0 })),
   };
 }
 

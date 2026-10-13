@@ -75,14 +75,44 @@ app.post('/api/refresh', (_, res) => { // « Tout actualiser » : badges puis ca
   res.json({ ok: true, already });
 });
 // Boutons de scan : chacun lance une tâche indépendante dont la progression est dans /api/state (tasks)
+const scanFn = (k) => { const c = cfg(); return { badges: () => engine.scanBadges(c), cards: () => engine.scanCards(c), boosters: () => engine.scanBoosters(c), gems: () => engine.scanGems(c),
+  bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance(), verify: () => engine.scanVerify() }[k]; };
 app.post('/api/scan/:task', (req, res) => {
-  const k = req.params.task, c = cfg();
-  const fn = { badges: () => engine.scanBadges(c), cards: () => engine.scanCards(c), boosters: () => engine.scanBoosters(c), gems: () => engine.scanGems(c),
-    bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance(), verify: () => engine.scanVerify() }[k];
+  const k = req.params.task, fn = scanFn(k);
   if (!fn) return res.status(400).json({ error: 'Scan inconnu' });
   if (isDemo() && !['verify', 'friends'].includes(k)) engine.demoScan(k); else Promise.resolve(fn()).catch((e) => { S.error = e.message; });
   res.json({ ok: true });
 });
+// ---- planificateur : lance les scans choisis une fois par jour à l'heure indiquée (l'app doit être ouverte) ----
+const SCHED_DEFAULT = 'badges,cards,bot,balance,verify', sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+let schedBusy = false;
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+async function runScheduled() {
+  schedBusy = true;
+  try {
+    ensureStarted();
+    for (const k of (env.SCHED_TASKS || SCHED_DEFAULT).split(',').filter(Boolean)) {
+      const fn = scanFn(k); if (!fn) continue;
+      try { await fn(); } catch { /* on passe au suivant */ }
+      while (S.tasks[k] && S.tasks[k].state === 'running') await sleepMs(2000);
+    }
+  } finally { schedBusy = false; }
+}
+setInterval(() => {
+  if (schedBusy || isDemo() || env.SCHED_ON !== '1') return;
+  const [h, m] = String(env.SCHED_TIME || '03:00').split(':').map(Number), now = new Date();
+  if (env.SCHED_LAST === todayStr() || now.getHours() * 60 + now.getMinutes() < h * 60 + (m || 0)) return;
+  config.save(DATA_DIR, { SCHED_LAST: todayStr() }); reloadEnv(); // « fait aujourd'hui » avant de commencer : pas de double lancement
+  runScheduled().catch(() => {});
+}, 60e3).unref();
+app.get('/api/goal', (req, res) => { try { res.json(engine.goalPlan(req.query.level)); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.get('/api/spare', (_, res) => { try { res.json(engine.spareReport()); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/event/add', (req, res) => { try { engine.eventAdd(req.body.name, req.body.start, req.body.end); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/event/remove', (req, res) => { engine.eventRemove(String(req.body.id)); res.json({ ok: true }); });
+app.get('/api/compare/:id', (req, res) => { try { res.json(engine.compareFriend(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.get('/api/rare', (_, res) => { try { res.json({ list: engine.rareTargets() }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/journal/add', (req, res) => { try { engine.journalAdd(req.body || {}); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/journal/remove', (req, res) => { engine.journalRemove(String(req.body.id)); res.json({ ok: true }); });
 app.post('/api/wish/add', (req, res) => { try { engine.wishAdd(String(req.body.hash)); engine.checkWishes().catch(() => {}); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/wish/remove', (req, res) => { engine.wishRemove(String(req.body.hash)); res.json({ ok: true }); });
 app.post('/api/wish/check', async (_, res) => { await engine.checkWishes(); res.json({ ok: true }); });
@@ -158,6 +188,7 @@ app.post('/api/gems/craft', async (req, res) => {
     if (S.catalog.gems.total && S.catalog.gems.total < cat.price) throw new Error(`Pas assez de gemmes : il en faut ${cat.price}, tu en as ${S.catalog.gems.total}.`);
     const r = await trader.createBooster(appid);
     S.catalog.gems = { total: r.totalGems, tradable: r.tradableGems, untradable: r.untradableGems };
+    engine.journalAdd({ type: 'craft', text: `Booster fabriqué : ${cat.name || 'jeu ' + appid} (${cat.price} gemmes)`, auto: true });
     S.invT = 0; engine.saveState(); // l'inventaire a changé : le prochain scan le relira
     res.json({ ok: true, totalGems: r.totalGems, item: r.resultItem || null });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -259,11 +290,13 @@ app.post('/api/trade/send', async (req, res) => {
     if (give.some((id) => !mine.has(String(id)))) throw new Error('Une carte à donner n\'est plus dans ton inventaire : clique sur Actualiser puis recommence.');
     const partner = source === 'friend' ? friendId : source === 'bot' ? (tradeUrl || env.BOT_TRADE_URL) : tradeUrl;
     if (!partner) throw new Error('Il manque le lien d\'échange du bot (Réglages) ou du partenaire.');
-    res.json(await trader.sendOffer(env, { tradeUrl: partner, give, ask }));
+    const r = await trader.sendOffer(env, { tradeUrl: partner, give, ask });
+    engine.journalAdd({ type: 'trade', text: `Offre envoyée (${ask.length} carte(s) demandée(s), ${give.length} donnée(s)) — ${source === 'friend' ? 'ami' : source === 'bot' ? 'bot' : 'lien'}`, auto: true });
+    res.json(r);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-const PUBLIC_KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL', 'THEME', 'BOT_ONLY', 'AUTO_CARDS', 'CREDITS_BALANCE', 'CREDITS_PER_CARD', 'CREDIT_VALUE', 'LEADERBOARD_URL'];
+const PUBLIC_KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL', 'THEME', 'BOT_ONLY', 'AUTO_CARDS', 'CREDITS_BALANCE', 'CREDITS_PER_CARD', 'CREDIT_VALUE', 'SCHED_ON', 'SCHED_TIME', 'SCHED_TASKS', 'LEADERBOARD_URL'];
 app.get('/api/settings', (_, res) => {
   const out = {};
   for (const k of PUBLIC_KEYS) out[k] = env[k] || '';

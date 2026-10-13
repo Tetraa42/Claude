@@ -17,7 +17,8 @@ const S = {
   retry: { at: 0, n: 0 }, gems: { gems: 0, sacks: 0 }, invT: 0, catalog: { t: 0, gems: { total: 0, tradable: 0, untradable: 0 }, map: {} }, gemVal: {},
   tasks: Object.fromEntries(['badges', 'cards', 'boosters', 'gems', 'bot', 'friends', 'balance', 'verify'].map((k) => [k, { state: 'idle', pct: 0, label: '', eta: null, estSec: 0, timeBased: false, t0: 0, doneAt: 0, error: null }])),
   friends: { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map() },
-  rank: { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0 },
+  rank: { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0, badges: new Map() },
+  journal: [], events: null,
 };
 let runId = 0;
 const statsCache = new Map();
@@ -72,7 +73,7 @@ function saveState() {
   if (!S.demo && S.profile) recordHistory();
   if (S.demo || !S.profile) return; // rien d'utile à sauvegarder : on ne remplace surtout pas une bonne sauvegarde par un état vide
   try {
-    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, drops: [...S.drops], sets: S.sets, myCards: S.myCards, boosters: S.boosters, gems: S.gems, catalog: S.catalog, gemVal: S.gemVal, invT: S.invT, wishlist: S.wishlist, alerts: S.alerts, history: S.history, taskAt: Object.fromEntries(Object.entries(S.tasks).map(([k, t]) => [k, t.doneAt])),
+    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, drops: [...S.drops], sets: S.sets, myCards: S.myCards, boosters: S.boosters, gems: S.gems, catalog: S.catalog, gemVal: S.gemVal, invT: S.invT, wishlist: S.wishlist, alerts: S.alerts, history: S.history, journal: S.journal, events: S.events, taskAt: Object.fromEntries(Object.entries(S.tasks).map(([k, t]) => [k, t.doneAt])),
       rank: S.rank.list, rankT: S.rank.t });
   } catch {}
 }
@@ -81,7 +82,7 @@ function loadSaved() {
     const d = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
     if (d.v !== 2) return false;
     Object.assign(S, { drops: new Map(d.drops || []), profile: d.profile, completed: d.completed || [], sets: d.sets || [], myCards: d.myCards || [], boosters: d.boosters || [], updatedAt: d.t || 0, currency: d.currency || 3 });
-    S.gems = d.gems || { gems: 0, sacks: 0 }; S.invT = d.invT || 0; if (d.catalog) S.catalog = d.catalog; S.gemVal = d.gemVal || {}; S.wishlist = d.wishlist || []; S.alerts = d.alerts || []; S.history = d.history || [];
+    S.gems = d.gems || { gems: 0, sacks: 0 }; S.invT = d.invT || 0; if (d.catalog) S.catalog = d.catalog; S.gemVal = d.gemVal || {}; S.wishlist = d.wishlist || []; S.alerts = d.alerts || []; S.history = d.history || []; S.journal = d.journal || []; S.events = d.events || null;
     for (const [k, at] of Object.entries(d.taskAt || {})) if (S.tasks[k] && at) Object.assign(S.tasks[k], { state: 'done', pct: 100, doneAt: at }); // « dernier scan : il y a … »
     restoreBot(); // l'inventaire du bot est mémorisé à part (sce.json)
     S.rank.list = d.rank || []; S.rank.t = d.rankT || 0; S.rank.status = S.rank.list.length ? 'ready' : 'idle';
@@ -317,7 +318,7 @@ async function scanRank(cfg) {
   if (R.status === 'loading') return;
   Object.assign(R, { status: 'loading', error: null, done: 0, total: 0 });
   try {
-    if (S.demo) { R.list = demo.demoRank(S); R.status = 'ready'; return; }
+    if (S.demo) { R.list = demo.demoRank(S); R.badges = demo.demoBadges(S); R.badges.set(S.profile.steamid, S.sets.map((x) => ({ appid: x.appid, level: x.badgeLevel, xp: 100, scarcity: 50000 }))); R.status = 'ready'; return; }
     const friends = S.friends.list.length ? S.friends.list : await steam.getFriends(cfg.key, S.profile.steamid);
     S.friends.list = friends;
     const people = [{ steamid: S.profile.steamid, name: S.profile.name, avatar: S.profile.avatar, me: true }, ...friends];
@@ -328,6 +329,7 @@ async function scanRank(cfg) {
       if (!st || Date.now() - st.t > RANK_TTL) {
         try { st = { t: Date.now(), ...(await steam.getBadgeStats(cfg.key, p.steamid)) }; statsCache.set(p.steamid, st); await steam.sleep(120); } catch { st = null; }
       }
+      if (st && st.badges) R.badges.set(p.steamid, st.badges);
       if (st) out.push({ steamid: p.steamid, name: p.name, avatar: p.avatar, me: !!p.me, level: st.level, xp: st.xp, badgeCount: st.badgeCount, rareCount: st.rareCount, rarity: st.rarity });
       R.done++;
       R.list = out.slice();
@@ -349,7 +351,12 @@ function setCatalog(r) {
   S.catalog = { t: Date.now(), gems: { total: r.totalGems, tradable: r.tradableGems, untradable: r.untradableGems }, map };
   saveState();
 }
-const catalogList = () => Object.entries(S.catalog.map).map(([appid, v]) => ({ appid: Number(appid), ...v })).sort((a, b) => a.price - b.price);
+// Rentabilité d'un booster : 3 cartes au prix moyen du marché du jeu (valeur ≈ ce qu'on récupère) rapportée à 1 000 gemmes
+const catalogList = () => Object.entries(S.catalog.map).map(([appid, v]) => {
+  const a = Number(appid), set = S.sets.find((x) => x.appid === a), prices = set ? set.cards.map((c) => c.price).filter((p) => p > 0) : [];
+  const avg = prices.length ? prices.reduce((t, p) => t + p, 0) / prices.length : null, w = (sce.lookup(a, v.name) || {}).worth || null;
+  return { appid: a, ...v, ev: avg != null ? +(3 * avg).toFixed(3) : null, evCredits: w ? +(3 * w).toFixed(1) : null, perK: avg != null && v.price ? +((3 * avg * 1000) / v.price).toFixed(3) : null };
+}).sort((a, b) => a.price - b.price);
 function setGemValue(appid, v) { S.gemVal[appid] = v; saveState(); }
 function demoCatalog() {
   const names = ['Starfall Odyssey', 'Neon Samurai', 'Cave of Embers', 'Pixel Pirates', 'Mecha Garden', 'Frost Kingdom', 'Void Runners', 'Candy Rally'];
@@ -523,12 +530,14 @@ function alertSet(appid, target) {
 }
 const alertsState = () => S.alerts.map((a) => { const s = S.sets.find((x) => x.appid === a.appid); const cost = s && s.cost != null ? s.cost : null; return { ...a, cost, hit: cost != null && cost > 0 && cost <= a.target, banner: header(a.appid) }; });
 // ---------- sauvegarde / export ----------
-function exportData() { return { wishlist: S.wishlist, alerts: S.alerts, history: S.history, gemVal: S.gemVal }; }
+function exportData() { return { wishlist: S.wishlist, alerts: S.alerts, history: S.history, journal: S.journal, events: S.events, gemVal: S.gemVal }; }
 function importData(d) {
   if (!d || typeof d !== 'object') throw new Error('Fichier invalide');
   if (Array.isArray(d.wishlist)) S.wishlist = d.wishlist.filter((w) => w && w.hash && w.name);
   if (Array.isArray(d.alerts)) S.alerts = d.alerts.filter((a) => a && a.appid && a.target > 0);
   if (Array.isArray(d.history)) S.history = d.history.filter((h) => h && h.t && h.xp != null).slice(-1500);
+  if (Array.isArray(d.journal)) S.journal = d.journal.filter((j) => j && j.id && j.t).slice(0, 1000);
+  if (Array.isArray(d.events)) S.events = d.events.filter((e) => e && e.name && e.start && e.end);
   if (d.gemVal && typeof d.gemVal === 'object') S.gemVal = d.gemVal;
   saveState();
 }
@@ -539,10 +548,86 @@ function setsCsv() {
   return '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n');
 }
 
+// ---------- 🎯 objectif de niveau : les badges les moins chers pour atteindre le niveau X ----------
+function goalPlan(target) {
+  const p = S.profile; if (!p) throw new Error('Profil non chargé : lance le scan « Badges ».');
+  target = Math.floor(Number(target));
+  if (!(target > p.level)) throw new Error(`Choisis un niveau supérieur au tien (${p.level}).`);
+  const need = totalXpForLevel(target) - p.xp;
+  const lvl = levelsMap();
+  const cand = S.sets.filter((s) => !s.provisional && s.cost != null && (lvl.get(s.appid) || 0) < 5)
+    .map((s) => ({ appid: s.appid, name: s.name, banner: s.banner, cost: s.cost, missing: s.missingCount, badgeLevel: s.badgeLevel }))
+    .sort((a, b) => a.cost - b.cost || a.missing - b.missing);
+  const steps = []; let xp = 0, cost = 0;
+  for (const c of cand) { if (xp >= need) break; xp += 100; cost += c.cost; steps.push({ ...c, cumXp: xp, cumCost: +cost.toFixed(2) }); }
+  return { target, level: p.level, need, steps, totalCost: +cost.toFixed(2), feasible: xp >= need, missingXp: Math.max(0, need - xp), candidates: cand.length, provisional: S.sets.some((s) => s.provisional) };
+}
+// ---------- ♻ doublons à revendre pour financer le prochain set ----------
+function spareReport() {
+  const bal = sce.status().balance || 0;
+  const groups = [...groupBy(spareCards(), (c) => c.hash).values()].map((l) => {
+    const w = (sce.lookup(l[0].appid, l[0].game) || {}).worth || 0;
+    return { hash: l[0].hash, name: l[0].name, game: l[0].game, appid: l[0].appid, img: l[0].img, count: l.length, worth: w, total: +(w * l.length).toFixed(2), assetids: l.map((c) => c.assetid) };
+  }).sort((a, b) => b.total - a.total);
+  const totalValue = +groups.reduce((t, g) => t + g.total, 0).toFixed(2);
+  const first = buildPlan()[0]; // le set complétable le moins cher
+  let target = null;
+  if (first) {
+    const shortfall = Math.max(0, +(first.total - bal).toFixed(2)), sell = []; let got = 0;
+    for (const g of groups) { for (let i = 0; i < g.count && got < shortfall; i++) { sell.push({ name: g.name, game: g.game, worth: g.worth, img: g.img }); got += g.worth; } if (got >= shortfall) break; }
+    target = { appid: first.appid, name: first.name, total: first.total, url: first.url, balance: bal, shortfall, sell, covered: got >= shortfall };
+  }
+  return { groups, totalValue, target, balance: bal, home: 'https://www.steamcardexchange.net/index.php?inventory' };
+}
+// ---------- 🎴 cartes à récupérer en jouant ----------
+function dropsList() {
+  return [...S.drops.entries()].filter(([, n]) => n > 0).map(([appid, n]) => ({ appid, drops: n, name: S.names.get(appid) || (sce.lookup(appid) || {}).name || `Jeu ${appid}`, banner: header(appid) })).sort((a, b) => b.drops - a.drops);
+}
+// ---------- 📅 soldes et événements Steam (dates indicatives, modifiables) ----------
+const DEFAULT_EVENTS = [
+  { id: 'd1', name: 'Soldes d\'automne Steam', start: '2026-11-25', end: '2026-12-02', approx: true },
+  { id: 'd2', name: 'Soldes d\'hiver Steam', start: '2026-12-17', end: '2027-01-04', approx: true },
+];
+const eventsList = () => (S.events || DEFAULT_EVENTS).map((e) => ({ ...e, startMs: new Date(e.start + 'T18:00:00Z').getTime(), endMs: new Date(e.end + 'T18:00:00Z').getTime() })).filter((e) => e.endMs > Date.now()).sort((a, b) => a.startMs - b.startMs);
+function eventAdd(name, start, end) {
+  if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) throw new Error('Nom et dates (AAAA-MM-JJ) requis.');
+  S.events = [...(S.events || DEFAULT_EVENTS), { id: 'e' + Date.now(), name: String(name).slice(0, 80), start, end, approx: false }]; saveState();
+}
+const eventRemove = (id) => { S.events = (S.events || DEFAULT_EVENTS).filter((e) => e.id !== id); saveState(); };
+// ---------- ⚔ comparaison avec un ami et 💎 badges rares à viser ----------
+function myBadgeMap() { return new Map((S.profile ? S.profile.badges : []).map((b) => [b.appid, b])); }
+const gameName = (appid) => S.names.get(appid) || (sce.lookup(appid) || {}).name || `Jeu ${appid}`;
+function compareFriend(steamid) {
+  const fb = S.rank.badges.get(steamid); if (!fb) throw new Error('Lance d\'abord « Analyser mes amis » (onglet Classement).');
+  const me = myBadgeMap(), fm = new Map(fb.map((b) => [b.appid, b]));
+  const row = (appid, mine, theirs) => ({ appid, name: gameName(appid), mine, theirs });
+  const onlyFriend = [], onlyMe = [], higherFriend = [], higherMe = [];
+  for (const [a, b] of fm) { const m = me.get(a); if (!m) onlyFriend.push(row(a, 0, b.level)); else if (b.level > m.level) higherFriend.push(row(a, m.level, b.level)); else if (m.level > b.level) higherMe.push(row(a, m.level, b.level)); }
+  for (const [a, m] of me) if (!fm.has(a)) onlyMe.push(row(a, m.level, 0));
+  const person = S.rank.list.find((x) => x.steamid === steamid) || {}, mine = S.rank.list.find((x) => x.me) || {};
+  const cap = (l) => l.slice(0, 80);
+  return { friend: { name: person.name, level: person.level, badgeCount: person.badgeCount, rarity: person.rarity }, me: { level: mine.level, badgeCount: mine.badgeCount, rarity: mine.rarity },
+    onlyFriend: cap(onlyFriend), onlyMe: cap(onlyMe), higherFriend: cap(higherFriend), higherMe: cap(higherMe), counts: { onlyFriend: onlyFriend.length, onlyMe: onlyMe.length, higherFriend: higherFriend.length, higherMe: higherMe.length } };
+}
+function rareTargets() {
+  if (!S.rank.badges.size) throw new Error('Lance d\'abord « Analyser mes amis » (onglet Classement) : l\'app lit la rareté des badges de tes amis.');
+  const me = myBadgeMap(), best = new Map();
+  for (const [id, list] of S.rank.badges) { if (S.profile && id === S.profile.steamid) continue; for (const b of list) if (b.scarcity > 0 && !(me.get(b.appid) || {}).level) { const cur = best.get(b.appid); if (!cur || b.scarcity < cur.scarcity) best.set(b.appid, { appid: b.appid, scarcity: b.scarcity }); } }
+  return [...best.values()].map((x) => { const s = S.sets.find((y) => y.appid === x.appid); return { ...x, name: gameName(x.appid), points: +steam.rarityPoints(x.scarcity).toFixed(1), banner: header(x.appid), progress: s ? { owned: s.ownedUnique, total: s.total, cost: s.cost } : null }; })
+    .sort((a, b) => b.points - a.points || (a.progress && a.progress.cost != null ? a.progress.cost : 1e9) - (b.progress && b.progress.cost != null ? b.progress.cost : 1e9)).slice(0, 40);
+}
+// ---------- 📒 journal des échanges, achats et ventes ----------
+function journalAdd({ type, text, credits, auto }) {
+  const c = Number(String(credits == null ? 0 : credits).replace(',', '.')) || 0;
+  S.journal.unshift({ id: 'j' + Date.now() + Math.floor(Math.random() * 1000), t: Date.now(), type: ['trade', 'buy', 'sell', 'craft', 'other'].includes(type) ? type : 'other', text: String(text || '').slice(0, 300), credits: c, auto: !!auto });
+  if (S.journal.length > 1000) S.journal.length = 1000; saveState();
+}
+const journalRemove = (id) => { S.journal = S.journal.filter((j) => j.id !== id); saveState(); };
+
 function loadDemo() {
   Object.assign(S, { demo: true, running: false, error: null }, demo.demoState()); demo.demoCredits(sce);
   S.gems = { gems: 4250, sacks: 2 }; demoCatalog();
-  S.wishlist = []; S.alerts = [];
+  S.wishlist = []; S.alerts = []; S.journal = [{ id: 'j1', t: Date.now() - 86400e3 * 2, type: 'sell', text: 'Revente de 4 doublons au bot', credits: 24, auto: false }, { id: 'j2', t: Date.now() - 86400e3, type: 'buy', text: 'Set « Cave of Embers » (2 cartes)', credits: -15, auto: false }];
   S.history = Array.from({ length: 30 }, (_, i) => ({ t: Date.now() - (29 - i) * 86400e3, level: 23 + (i > 14 ? 1 : 0), xp: 3500 + i * 28 + (i % 4) * 9, badges: 40 + Math.floor(i / 4), balance: 4 + i * 0.3, gems: 3000 + i * 40 }));
   for (const k of ['badges', 'cards', 'boosters', 'gems', 'bot', 'balance']) Object.assign(S.tasks[k], { state: 'done', pct: 100, doneAt: Date.now() - (k.length * 4 + 3) * 60e3, error: null });
 }
@@ -601,7 +686,7 @@ function snapshot(opt = {}) {
     bot: { status: B.status, error: B.error, name: B.name, count: B.count, games: B.games, botOnly: S.botOnly },
     friends: { status: F.status, error: F.error, done: F.done, total: F.total, count: F.list.length },
     rank: { status: S.rank.status, error: S.rank.error, done: S.rank.done, total: S.rank.total, list: S.rank.list },
-    ready: readiness(), wishlist: wishState(), alerts: alertsState(), history: S.history, pace: p ? pace(totalXpForLevel(p.level + 1) - p.xp) : null,
+    ready: readiness(), dropsList: dropsList(), events: eventsList(), journal: S.journal, wishlist: wishState(), alerts: alertsState(), history: S.history, pace: p ? pace(totalXpForLevel(p.level + 1) - p.xp) : null,
     projection: p && { gainXp: gain, level: levelFromXp(p.xp + gain).level, nextLevelXp: totalXpForLevel(p.level + 1) - p.xp },
     credits: { balance: scest.balance != null ? scest.balance : manual, perCard: cpc || null, sce: scest, ownedValue, spareValue },
   };
@@ -643,4 +728,4 @@ function spareCards() {
   }
   return out;
 }
-module.exports = { S, deals, wishTarget, alertSet, exportData, importData, setsCsv, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };
+module.exports = { S, goalPlan, spareReport, eventAdd, eventRemove, compareFriend, rareTargets, journalAdd, journalRemove, deals, wishTarget, alertSet, exportData, importData, setsCsv, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };

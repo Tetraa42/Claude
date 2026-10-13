@@ -111,9 +111,14 @@ function renderPlan(plan) {
   if (!plan.length) return '<p class="mut small">Aucun jeu n\'est complétable pour le moment : le bot n\'a pas toutes les cartes manquantes d\'un seul jeu.</p>';
   return `<div class="plan"><small>Échanges proposés (du moins cher au plus cher) — chaque bouton ouvre la page du jeu chez le bot :</small>${plan.map((g) => `
     <div class="pitem ${g.feasible ? '' : 'no'}"><a class="rbtn go" href="${esc(g.url)}" target="_blank" rel="noopener" title="Ouvrir la page du jeu sur SteamCardExchange">⇄ ${esc(g.name)} — ${g.missing} carte(s) · ${g.total} cr</a>
-    <small>${g.buy.map((c) => `${esc(c.name)} (${c.price} cr)`).join(' · ')}${g.feasible ? (g.sell.length ? `<br>Paie avec le solde + revente de : ${g.sell.map((c) => `${esc(c.name)} (+${c.worth})`).join(', ')}` : '<br>Payé avec ton solde de crédits') : `<br>⚠ Il te manque ${g.short} crédit(s) (même en revendant tes doublons)`}</small></div>`).join('')}</div>`;
+    <button class="ghost sm" data-done="${g.appid}" title="Note cet échange dans le journal">✔ Fait</button> <small>${g.buy.map((c) => `${esc(c.name)} (${c.price} cr)`).join(' · ')}${g.feasible ? (g.sell.length ? `<br>Paie avec le solde + revente de : ${g.sell.map((c) => `${esc(c.name)} (+${c.worth})`).join(', ')}` : '<br>Payé avec ton solde de crédits') : `<br>⚠ Il te manque ${g.short} crédit(s) (même en revendant tes doublons)`}</small></div>`).join('')}</div>`;
 }
-$('#ready').addEventListener('click', safe(async (e) => { const b = e.target.closest('[data-do]'); if (b) await startScan(b.dataset.do); }));
+$('#ready').addEventListener('click', safe(async (e) => {
+  const b = e.target.closest('[data-do]'); if (b) await startScan(b.dataset.do);
+  const dn = e.target.closest('[data-done]');
+  if (dn) { const g = st.ready.plan.find((x) => x.appid == dn.dataset.done); if (!g) return; const sold = g.sell.reduce((t, c) => t + c.worth, 0);
+    await api('/api/journal/add', { type: 'buy', text: `Set « ${g.name} » (${g.missing} carte(s))${g.sell.length ? ` + revente de ${g.sell.length} doublon(s)` : ''}`, credits: +(sold - g.total).toFixed(2) }); toast('📒 Ajouté au journal'); poll(); }
+}));
 // ---------- liste de souhaits ----------
 function drawWish() {
   const w = st.wishlist || [], al = st.alerts || [], box = $('#wbody');
@@ -144,17 +149,46 @@ function lineChart(pts, key, color, fmt = (v) => nf(Math.round(v))) {
   return `<svg viewBox="0 0 ${W} ${H}" class="lc" role="img"><path d="${path} L${X(last.t).toFixed(1)},${H - P} L${P},${H - P}Z" fill="${color}" opacity=".12"/><path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${X(last.t).toFixed(1)}" cy="${Y(last[key]).toFixed(1)}" r="4" fill="${color}"/></svg>
     <div class="lcax"><span>${fmt(lo)}</span><span>${new Date(t0).toLocaleDateString('fr-FR')} → ${new Date(t1).toLocaleDateString('fr-FR')}</span><span>${fmt(hi)}</span></div>`;
 }
+const dayWord = (ms) => { const d = Math.ceil((ms - Date.now()) / 86400e3); return d <= 0 ? 'en cours' : d === 1 ? 'demain' : `dans ${d} jours`; };
 function drawProg() {
   const h = st.history || [], pc = st.pace, box = $('#pbody');
-  const sig = JSON.stringify([h.length, h[h.length - 1], pc]); if (box._sig === sig) return; box._sig = sig;
-  if (h.length < 2) { box.innerHTML = '<div class="sbox">L\'historique se construit à chaque scan (niveau, XP, badges, crédits, gemmes). Reviens après quelques jours pour voir ta courbe et le rythme de progression.</div>'; return; }
-  const first = h[0], last = h[h.length - 1];
-  const eta = pc && pc.etaDays ? new Date(Date.now() + pc.etaDays * 86400e3).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : null;
-  box.innerHTML = `<div class="kpis"><div class="stat"><b>${last.level}</b><small>niveau actuel (+${last.level - first.level} depuis le début)</small></div><div class="stat"><b>+${nf(last.xp - first.xp)}</b><small>XP gagnée sur la période</small></div>
+  const sig = JSON.stringify([h.length, h[h.length - 1], pc, st.dropsList, st.events, st.profile && st.profile.level]); if (box._sig === sig) return;
+  if (box.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; box._sig = sig;
+  let top = '<div class="sbox">L\'historique se construit à chaque scan (niveau, XP, badges, crédits, gemmes). Reviens après quelques jours pour voir ta courbe et le rythme de progression.</div>';
+  if (h.length >= 2) {
+    const first = h[0], last = h[h.length - 1];
+    const eta = pc && pc.etaDays ? new Date(Date.now() + pc.etaDays * 86400e3).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : null;
+    top = `<div class="kpis"><div class="stat"><b>${last.level}</b><small>niveau actuel (+${last.level - first.level} depuis le début)</small></div><div class="stat"><b>+${nf(last.xp - first.xp)}</b><small>XP gagnée sur la période</small></div>
     <div class="stat"><b>${pc && pc.xpPerDay ? pc.xpPerDay : '–'}</b><small>XP par jour (30 derniers jours)</small></div><div class="stat"><b>${eta || '–'}</b><small>${eta ? `niveau ${last.level + 1} estimé (dans ${pc.etaDays} j)` : 'niveau suivant : pas assez de données'}</small></div></div>
     <div class="charts"><div class="cbox"><h4>XP</h4>${lineChart(h, 'xp', 'var(--ac)')}</div><div class="cbox"><h4>Badges</h4>${lineChart(h, 'badges', '#22c55e')}</div>
     <div class="cbox"><h4>Crédits SCE</h4>${lineChart(h, 'balance', '#f59e0b', (v) => v.toFixed(1))}</div><div class="cbox"><h4>Gemmes</h4>${lineChart(h, 'gems', '#a855f7')}</div></div>`;
+  }
+  const lvl = st.profile ? st.profile.level : 0, goal = prefs.goal && prefs.goal > lvl ? prefs.goal : lvl + 5;
+  const drops = (st.dropsList || []).slice(0, 30), dTot = (st.dropsList || []).reduce((t, x) => t + x.drops, 0);
+  box.innerHTML = top + `
+  <div class="cbox sec2"><h4>🎯 Objectif de niveau</h4><div class="row" style="justify-content:flex-start;gap:10px"><label class="tgt" style="font-size:14px">Niveau visé <input id="goalin" type="number" min="${lvl + 1}" value="${goal}" style="width:90px"></label><button id="goalgo" class="ghost">Calculer le plan</button></div><div id="goalout"></div></div>
+  <div class="cbox sec2"><h4>🎴 À récupérer en jouant ${dTot ? `<small class="mut">— ${nf(dTot)} carte(s) dans ${(st.dropsList || []).length} jeu(x)</small>` : ''}</h4>${drops.length ? `<div class="flist">${drops.map((d) => `<div class="frow"><img src="${esc(d.banner)}" alt="" style="width:90px;height:42px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'"><div class="grow"><b>${esc(d.name)}</b><br><small>${d.drops} carte(s) à obtenir</small></div><a class="ghost sm" href="steam://run/${d.appid}">▶ Lancer le jeu</a></div>`).join('')}</div>` : '<p class="mut small">Aucune carte à récupérer en jouant (ou page des badges pas encore lue).</p>'}</div>
+  <div class="cbox sec2"><h4>📅 Soldes et événements Steam</h4>${(st.events || []).length ? `<div class="flist">${st.events.map((e) => `<div class="frow"><div class="grow"><b>${esc(e.name)}</b>${e.approx ? ' <small class="mut" title="Dates indicatives : vérifie-les sur Steam et supprime / ajoute au besoin">· dates indicatives</small>' : ''}<br><small>${new Date(e.startMs).toLocaleDateString('fr-FR')} → ${new Date(e.endMs).toLocaleDateString('fr-FR')} · <b>${dayWord(e.startMs)}</b></small></div><button class="ghost sm" data-evdel="${esc(e.id)}">Retirer</button></div>`).join('')}</div>` : '<p class="mut small">Aucun événement à venir.</p>'}<div style="margin-top:8px"><button class="ghost sm" id="evadd">➕ Ajouter un événement</button></div></div>`;
+  $('#goalgo').onclick = safe(async () => { prefs.goal = Number($('#goalin').value); savePrefs(); await showGoal(prefs.goal); });
+  if (prefs.goal && prefs.goal > lvl) showGoal(prefs.goal).catch(() => {});
 }
+async function showGoal(level) {
+  const out = $('#goalout'); out.innerHTML = '<p class="mut small">Calcul…</p>';
+  try {
+    const g = await api('/api/goal?level=' + level);
+    out.innerHTML = `<p style="margin:8px 0"><b>Niveau ${g.level} → ${g.target}</b> : il faut <b>${nf(g.need)} XP</b> = ${Math.ceil(g.need / 100)} badge(s) / niveau(x) de badge.<br>${g.feasible ? `Plan le moins cher : <b>${money(g.totalCost)}</b> pour ${g.steps.length} set(s).` : `⚠ Avec tes sets actuels tu n'obtiens que ${nf(g.steps.length * 100)} XP sur ${nf(g.need)} (il manque ${nf(g.missingXp)} XP : ouvre d'autres jeux, boosters, nouveaux badges).`}${g.provisional ? '<br><small class="mut">Certains prix ne sont pas encore connus : relance « Cartes & sets ».</small>' : ''}</p>
+      ${g.steps.length ? `<table class="cards"><tr><th>#</th><th>Jeu</th><th>Manquantes</th><th>Coût</th><th>Cumul</th><th>XP cumulée</th></tr>${g.steps.map((x, i) => `<tr><td>${i + 1}</td><td><a class="lnk" href="#" data-goalopen="${x.appid}">${esc(x.name)}</a></td><td>${x.missing}</td><td>${x.cost ? money(x.cost) : 'Prêt à crafter'}</td><td>${money(x.cumCost)}</td><td>+${x.cumXp}</td></tr>`).join('')}</table>` : ''}`;
+  } catch (e) { out.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
+}
+$('#pbody').addEventListener('click', safe(async (e) => {
+  const o = e.target.closest('[data-goalopen]'); if (o) { e.preventDefault(); return openDetail(Number(o.dataset.goalopen)); }
+  const dl = e.target.closest('[data-evdel]'); if (dl) { await api('/api/event/remove', { id: dl.dataset.evdel }); $('#pbody')._sig = ''; return poll(); }
+  if (e.target.closest('#evadd')) {
+    const name = prompt('Nom de l\'événement :'); if (!name) return;
+    const start = prompt('Début (AAAA-MM-JJ) :'); if (!start) return; const end = prompt('Fin (AAAA-MM-JJ) :', start); if (!end) return;
+    await api('/api/event/add', { name, start, end }); $('#pbody')._sig = ''; poll();
+  }
+}));
 async function drawDeals() {
   const box = $('#dbody'); box.innerHTML = '<p class="mut">Calcul…</p>';
   try {
@@ -163,10 +197,50 @@ async function drawDeals() {
     <h3 style="margin:10px 0 8px">Cartes à acheter sur le marché pour les revendre au bot</h3>
     ${d.cards.length ? `<table class="cards"><tr><th>Carte</th><th>Jeu</th><th>Prix marché</th><th>Le bot donne</th><th>Crédits / ${st.currency === 3 ? '€' : st.currency === 2 ? '£' : '$'}</th>${cv ? '<th>Gain net</th>' : ''}</tr>${d.cards.map((c) => `<tr><td><img src="${esc(c.img)}" alt="" loading="lazy"> ${esc(c.name)}</td><td>${esc(c.game)}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.worth} cr</td><td><b>${c.ratio}</b></td>${cv ? `<td class="${c.net > 0 ? 'ok' : 'mut'}">${c.net > 0 ? '+' : ''}${money(c.net)}</td>` : ''}</tr>`).join('')}</table>` : '<div class="sbox">Pas encore de données : lance « Cartes & sets » et « Bot (SCE) ».</div>'}
     <h3 style="margin:22px 0 8px">Compléter un set : marché Steam ou bot ?</h3>
-    ${d.sets.length ? `<table class="cards"><tr><th>Jeu</th><th>Manquantes</th><th>Marché Steam</th><th>Chez le bot</th>${cv ? '<th>Le moins cher</th>' : ''}</tr>${d.sets.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.missing}</td><td>${money(x.market)}</td><td>${x.bot} cr${cv ? ` (≈ ${money(x.botEuro)})` : ''}</td>${cv ? `<td>${x.cheaper === 'bot' ? '🤖 bot' : '🛒 marché'}</td>` : ''}</tr>`).join('')}</table>` : '<div class="sbox">Lance « ✅ Vérifier les jeux » : l\'app compare alors les sets que le bot peut compléter en entier.</div>'}`;
+    ${d.sets.length ? `<table class="cards"><tr><th>Jeu</th><th>Manquantes</th><th>Marché Steam</th><th>Chez le bot</th>${cv ? '<th>Le moins cher</th>' : ''}</tr>${d.sets.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.missing}</td><td>${money(x.market)}</td><td>${x.bot} cr${cv ? ` (≈ ${money(x.botEuro)})` : ''}</td>${cv ? `<td>${x.cheaper === 'bot' ? '🤖 bot' : '🛒 marché'}</td>` : ''}</tr>`).join('')}</table>` : '<div class="sbox">Lance « ✅ Vérifier les jeux » : l\'app compare alors les sets que le bot peut compléter en entier.</div>'}
+    <div id="spare"></div><div id="rare"></div>`;
+    drawSpare(); drawRare();
   } catch (e) { box.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
 }
+async function drawSpare() {
+  const box = $('#spare'); if (!box) return;
+  try {
+    const d = await api('/api/spare'), t = d.target;
+    box.innerHTML = `<h3 style="margin:22px 0 8px">♻ Doublons à revendre au bot</h3>
+      ${t ? `<div class="sbox"><b>Prochain set à financer : ${esc(t.name)}</b> (${t.total} cr). Solde : ${t.balance} cr${t.shortfall ? ` → il te manque <b>${t.shortfall} cr</b>.<br>${t.covered ? `Revends ces cartes au bot (${t.sell.length}) : ${t.sell.map((c) => `${esc(c.name)} <small class="mut">(${esc(c.game)}, +${c.worth})</small>`).join(' · ')}` : '⚠ Même en revendant tous tes doublons, ça ne suffit pas.'}` : ' → <b>ton solde suffit</b>.'} <a class="ghost sm" href="${esc(t.url)}" target="_blank" rel="noopener">Ouvrir ${esc(t.name)} chez le bot ↗</a> <a class="ghost sm" href="${esc(d.home)}" target="_blank" rel="noopener">Inventaire du bot ↗</a></div>` : '<p class="mut small">Lance « ✅ Vérifier les jeux » pour savoir quel set financer.</p>'}
+      ${d.groups.length ? `<p class="mut small">${d.groups.reduce((n, g) => n + g.count, 0)} carte(s) en trop, valeur totale ≈ <b>${d.totalValue} cr</b>.</p><div class="mini big">${d.groups.slice(0, 40).map((g) => `<img src="${esc(g.img)}" title="${esc(g.name)} × ${g.count} — ${esc(g.game)} (${g.total} cr)" alt="">`).join('')}</div>` : '<p class="mut small">Aucun doublon pour le moment.</p>'}`;
+  } catch (e) { box.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
+}
+async function drawRare() {
+  const box = $('#rare'); if (!box) return;
+  try {
+    const d = await api('/api/rare');
+    box.innerHTML = `<h3 style="margin:22px 0 8px">💎 Badges rares à viser</h3><p class="mut small">Badges que tes amis possèdent et pas toi, du plus rare au moins rare (points de rareté ≈ 7 − log₁₀ du nombre de détenteurs).</p>
+      <table class="cards"><tr><th>Jeu</th><th>Détenteurs</th><th>Points</th><th>Ton avancement</th></tr>${d.list.map((x) => `<tr><td>${esc(x.name)}</td><td>${nf(x.scarcity)}</td><td><b>${x.points}</b></td><td>${x.progress ? `${x.progress.owned}/${x.progress.total} cartes${x.progress.cost != null ? ` · ${x.progress.cost ? money(x.progress.cost) : 'prêt à crafter'}` : ''}` : '<span class="mut">pas de carte</span>'}</td></tr>`).join('')}</table>`;
+  } catch (e) { box.innerHTML = `<h3 style="margin:22px 0 8px">💎 Badges rares à viser</h3><div class="sbox">${esc(e.message)}</div>`; }
+}
 $('#dreload').onclick = () => drawDeals();
+// ---------- journal ----------
+function drawJournal() {
+  const box = $('#jbody'), j = st.journal || [], sig = JSON.stringify(j); if (box._sig === sig) return;
+  if (box.contains(document.activeElement) && ['INPUT', 'SELECT'].includes(document.activeElement.tagName)) return; box._sig = sig;
+  const net = +j.reduce((t, x) => t + (x.credits || 0), 0).toFixed(2), ic = { trade: '⇄', buy: '🛒', sell: '💰', craft: '🛠', other: '•' };
+  box.innerHTML = `<div class="kpis"><div class="stat"><b class="${net >= 0 ? 'ok' : ''}">${net > 0 ? '+' : ''}${net} cr</b><small>bilan en crédits (${j.length} entrée(s))</small></div></div>
+  <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:10px 0"><select id="jtype"><option value="trade">⇄ Échange</option><option value="buy">🛒 Achat</option><option value="sell">💰 Vente</option><option value="craft">🛠 Fabrication</option><option value="other">• Autre</option></select>
+    <input id="jtext" placeholder="Description (ex. 3 cartes de Metal Slug 3 achetées au bot)" style="flex:1;min-width:220px"><input id="jcr" inputmode="decimal" placeholder="crédits (+/−)" style="width:120px"><button id="jadd" class="ghost">➕ Ajouter</button></div>
+  ${j.length ? `<div class="flist">${j.map((x) => `<div class="frow"><span>${ic[x.type] || '•'}</span><div class="grow"><b>${esc(x.text)}</b>${x.auto ? ' <small class="mut">· automatique</small>' : ''}<br><small>${new Date(x.t).toLocaleString('fr-FR')}</small></div><b class="${x.credits > 0 ? 'ok' : 'mut'}">${x.credits ? (x.credits > 0 ? '+' : '') + x.credits + ' cr' : ''}</b><button class="ghost sm" data-jdel="${esc(x.id)}">✕</button></div>`).join('')}</div>` : '<div class="sbox">Rien pour le moment. Les offres envoyées et les boosters fabriqués depuis l\'app s\'ajoutent tout seuls ; ajoute à la main tes échanges faits sur le site du bot (bouton « ✔ Fait » dans le plan d\'échanges).</div>'}`;
+}
+$('#jbody').addEventListener('click', safe(async (e) => {
+  const d = e.target.closest('[data-jdel]'); if (d) { await api('/api/journal/remove', { id: d.dataset.jdel }); $('#jbody')._sig = ''; return poll(); }
+  if (e.target.closest('#jadd')) { const text = $('#jtext').value.trim(); if (!text) return toast('Ajoute une description.', true); await api('/api/journal/add', { type: $('#jtype').value, text, credits: $('#jcr').value }); $('#jbody')._sig = ''; poll(); }
+}));
+// rappel quotidien des cartes à récupérer en jouant
+function dropsReminder() {
+  const n = (st.dropsList || []).reduce((t, x) => t + x.drops, 0), day = new Date().toDateString();
+  if (!n || lsGet('sbt.dropsDay', '') === day) return; lsSet('sbt.dropsDay', day);
+  toast(`🎴 ${nf(n)} carte(s) à récupérer en jouant (onglet Progrès)`);
+  try { if (window.Notification && Notification.permission === 'granted') new Notification('Cartes à récupérer', { body: `${nf(n)} carte(s) à obtenir en jouant` }); } catch {}
+}
 let wishSeen = new Set(lsGet('sbt.wishseen', []));
 function watchWishes() {
   const w = st.wishlist || [], n = w.filter((x) => x.available && !x.owned).length;
@@ -229,7 +303,7 @@ function render() {
   $('#status').hidden = !(g.wait || g.retryIn);
   if (g.wait || g.retryIn) $('#stt').textContent = g.wait ? `Steam demande de ralentir : reprise dans ${g.wait} s (rien n'est perdu)…${st.sets.length ? '' : ' Steam a limité ton adresse suite aux essais précédents : ça se débloque tout seul, souvent en moins d\'une heure.'}` : `Prochaine tentative automatique dans ${Math.ceil(g.retryIn / 60)} min.`;
   $('#err').hidden = !g.error; if (g.error) $('#err').textContent = '⚠ ' + g.error + (g.retryIn ? ` Nouvelle tentative automatique dans ${Math.ceil(g.retryIn / 60)} min.` : '');
-  renderScans(); renderReady(); watchWishes();
+  renderScans(); renderReady(); watchWishes(); dropsReminder();
   $('#nboost').textContent = st.boosters.reduce((t, b) => t + b.count, 0) || '';
   const u = st.update, upd = $('#upd'); upd.hidden = !(u && ['available', 'downloading', 'ready'].includes(u.status));
   if (!upd.hidden) upd.textContent = u.status === 'ready' ? '↻ Redémarrer pour mettre à jour' : u.status === 'downloading' ? `⬇ Téléchargement ${u.progress}%` : '⬇ Mise à jour disponible';
@@ -244,8 +318,8 @@ function render() {
 
 function showView() {
   document.querySelectorAll('#views button[data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === view));
-  $('#v-sets').hidden = view !== 'sets'; $('#v-boosters').hidden = view !== 'boosters'; $('#v-rank').hidden = view !== 'rank'; $('#v-wish').hidden = view !== 'wish'; $('#v-prog').hidden = view !== 'prog'; $('#v-deals').hidden = view !== 'deals';
-  if (view === 'prog') drawProg(); if (view === 'deals') drawDeals(); if (view === 'wish') drawWish(); if (view === 'sets') draw(); if (view === 'boosters') drawBoosters(); if (view === 'rank') drawRank();
+  $('#v-sets').hidden = view !== 'sets'; $('#v-boosters').hidden = view !== 'boosters'; $('#v-rank').hidden = view !== 'rank'; $('#v-wish').hidden = view !== 'wish'; $('#v-prog').hidden = view !== 'prog'; $('#v-deals').hidden = view !== 'deals'; $('#v-journal').hidden = view !== 'journal';
+  if (view === 'journal') drawJournal(); if (view === 'prog') drawProg(); if (view === 'deals') drawDeals(); if (view === 'wish') drawWish(); if (view === 'sets') draw(); if (view === 'boosters') drawBoosters(); if (view === 'rank') drawRank();
 }
 $('#views').onclick = (e) => {
   const b = e.target.closest('button[data-v]'); if (b) { view = prefs.view = b.dataset.v; savePrefs(); lastSig = ''; showView(); if (view === 'rank' && rankTab === 'global') loadGlobal(); }
@@ -471,10 +545,12 @@ async function drawCatalog() {
   const r = await api('/api/gems/list'); const box = $('#catbox');
   if (!r.list.length) { box.innerHTML = ''; return; }
   const q = catQ.toLowerCase(), own = new Set((st.sets || []).map((x) => x.appid));
-  const rows = r.list.filter((x) => !q || (x.name || '').toLowerCase().includes(q)).sort((a, b) => (own.has(b.appid) - own.has(a.appid)) || a.price - b.price).slice(0, 60);
+  const sortBy = lsGet('sbt.catsort', 'own');
+  const rows = r.list.filter((x) => !q || (x.name || '').toLowerCase().includes(q)).sort(sortBy === 'rent' ? (a, b) => (b.perK ?? -1) - (a.perK ?? -1) : (a, b) => (own.has(b.appid) - own.has(a.appid)) || a.price - b.price).slice(0, 60);
   box.innerHTML = `<p class="mut small">💎 ${nf(r.gems.total)} gemmes disponibles · ${r.list.length} boosters · mis à jour ${new Date(r.t).toLocaleTimeString('fr-FR')}</p>
-   <div class="search" style="margin:8px 0"><input id="catq" placeholder="Filtrer les boosters…" value="${esc(catQ)}"></div>
-   <div class="flist">${rows.map((x) => `<div class="frow"><div class="grow"><b>${esc(x.name || 'Jeu ' + x.appid)}</b>${own.has(x.appid) ? ' <small class="mut">· dans tes sets</small>' : ''}<br><small>${nf(x.price)} 💎${x.unavailable ? ' · indisponible' + (x.availableAtTime ? ' jusqu\'au ' + new Date(x.availableAtTime).toLocaleString('fr-FR') : '') : ''}</small></div><button class="ghost sm" data-craft="${x.appid}" ${x.unavailable || (r.gems.total && r.gems.total < x.price) ? 'disabled' : ''}>🛠 Fabriquer</button></div>`).join('')}</div>`;
+   <div class="row" style="justify-content:flex-start;gap:8px;margin:8px 0"><div class="search"><input id="catq" placeholder="Filtrer les boosters…" value="${esc(catQ)}"></div><select id="catsort"><option value="own" ${sortBy === 'own' ? 'selected' : ''}>Mes jeux d'abord, puis moins cher</option><option value="rent" ${sortBy === 'rent' ? 'selected' : ''}>Les plus rentables d'abord</option></select></div>
+   <div class="flist">${rows.map((x) => `<div class="frow"><div class="grow"><b>${esc(x.name || 'Jeu ' + x.appid)}</b>${own.has(x.appid) ? ' <small class="mut">· dans tes sets</small>' : ''}<br><small>${nf(x.price)} 💎${x.ev != null ? ` · 3 cartes ≈ ${money(x.ev)}${x.evCredits ? ` / ${x.evCredits} cr` : ''} · <b title="valeur des cartes pour 1 000 gemmes">${money(x.perK)} / 1 000 💎</b>` : ''}${x.unavailable ? ' · indisponible' + (x.availableAtTime ? ' jusqu\'au ' + new Date(x.availableAtTime).toLocaleString('fr-FR') : '') : ''}</small></div><button class="ghost sm" data-craft="${x.appid}" ${x.unavailable || (r.gems.total && r.gems.total < x.price) ? 'disabled' : ''}>🛠 Fabriquer</button></div>`).join('')}</div>`;
+  $('#catsort').onchange = () => { lsSet('sbt.catsort', $('#catsort').value); drawCatalog(); };
   const qi = $('#catq'); qi.oninput = () => { catQ = qi.value; const pos = qi.selectionStart; drawCatalog().then(() => { const n = $('#catq'); n.focus(); n.setSelectionRange(pos, pos); }); };
   box.querySelectorAll('[data-craft]').forEach((b) => { b.onclick = () => { const x = r.list.find((y) => y.appid === +b.dataset.craft); craftBooster(x.appid, x.name || 'Jeu ' + x.appid, x.price, b); }; });
 }
@@ -501,13 +577,21 @@ $('#bgrid').addEventListener('click', (e) => {
 
 // ---------- classement ----------
 async function loadGlobal() { try { glob = await api('/api/rank/global'); } catch (e) { glob = { error: e.message, list: [] }; } rSig = ''; drawRank(); }
+$('#rbody').addEventListener('click', safe(async (e) => {
+  const c = e.target.closest('[data-cmp]'); if (!c) return;
+  const d = await api('/api/compare/' + c.dataset.cmp), L = (title, l, n, f) => `<div class="cbox"><h4>${title} <small class="mut">(${n})</small></h4>${l.length ? `<ul class="cl">${l.map(f).join('')}</ul>` : '<p class="mut small">Aucun.</p>'}</div>`;
+  $('#cbody').innerHTML = `<h3>⚔ Toi contre ${esc(d.friend.name)}</h3><div class="kpis"><div class="stat"><b>${d.me.level} / ${d.friend.level}</b><small>niveau (toi / lui)</small></div><div class="stat"><b>${nf(d.me.badgeCount)} / ${nf(d.friend.badgeCount)}</b><small>badges</small></div><div class="stat"><b>${nf(d.me.rarity)} / ${nf(d.friend.rarity)}</b><small>rareté</small></div></div>
+    <div class="charts">${L('Badges qu\'il a et pas toi', d.onlyFriend, d.counts.onlyFriend, (x) => `<li>${esc(x.name)} <small class="mut">niv. ${x.theirs}</small></li>`)}${L('Badges que tu as et pas lui', d.onlyMe, d.counts.onlyMe, (x) => `<li>${esc(x.name)} <small class="mut">niv. ${x.mine}</small></li>`)}
+    ${L('Il a un niveau plus haut', d.higherFriend, d.counts.higherFriend, (x) => `<li>${esc(x.name)} <small class="mut">toi ${x.mine} · lui ${x.theirs}</small></li>`)}${L('Tu as un niveau plus haut', d.higherMe, d.counts.higherMe, (x) => `<li>${esc(x.name)} <small class="mut">toi ${x.mine} · lui ${x.theirs}</small></li>`)}</div>`;
+  $('#cdlg').showModal();
+}));
 function drawRank() {
   const sig = JSON.stringify([rankTab, $('#rmetric').value, st.rank, glob, st.leaderboard]); if (sig === rSig) return; rSig = sig;
   document.querySelectorAll('#rtabs button').forEach((b) => b.classList.toggle('on', b.dataset.r === rankTab));
   const m = $('#rmetric').value, box = $('#rbody');
   const table = (list) => `<table class="rank"><tr><th></th><th>Joueur</th><th>Niveau</th><th>Badges</th><th>Rareté</th></tr>${[...list].sort((a, b) => (b[m] || 0) - (a[m] || 0)).map((p, i) => `
     <tr class="${p.me ? 'me' : ''}"><td class="n">${['🥇', '🥈', '🥉'][i] || i + 1}</td><td><img src="${esc(p.avatar || '')}" alt="">${esc(p.name)}${p.me ? ' (toi)' : ''}</td>
-    <td class="${m === 'level' || m === 'xp' ? 'hl' : ''}">${p.level}</td><td class="${m === 'badgeCount' ? 'hl' : ''}">${nf(p.badgeCount)}</td><td class="${m === 'rarity' ? 'hl' : ''}">${nf(p.rarity)}${p.rareCount != null ? ` <small class="mut">· ${p.rareCount} rares</small>` : ''}</td></tr>`).join('')}</table>`;
+    <td class="${m === 'level' || m === 'xp' ? 'hl' : ''}">${p.level}${!p.me && rankTab === 'friends' ? ` <button class="ghost sm" data-cmp="${esc(p.steamid)}" title="Comparer tes badges avec ${esc(p.name)}">⚔</button>` : ''}</td><td class="${m === 'badgeCount' ? 'hl' : ''}">${nf(p.badgeCount)}</td><td class="${m === 'rarity' ? 'hl' : ''}">${nf(p.rarity)}${p.rareCount != null ? ` <small class="mut">· ${p.rareCount} rares</small>` : ''}</td></tr>`).join('')}</table>`;
   if (rankTab === 'friends') {
     const r = st.rank;
     const head = `<div class="row" style="margin-bottom:12px"><span class="mut">${r.status === 'loading' ? `Analyse ${r.done}/${r.total}…` : r.status === 'error' ? '⚠ ' + esc(r.error) : r.list.length ? `${r.list.length} joueurs` : 'Pas encore analysé'}</span><button class="ghost" id="rscan">${r.list.length ? '↻ Réanalyser' : '👥 Analyser mes amis'}</button></div>`;
@@ -564,6 +648,9 @@ async function openSettings() {
   $('#s_botonly').checked = c.BOT_ONLY !== '0'; $('#s_autocards').checked = c.AUTO_CARDS === '1';
   $('#s_cval').value = c.CREDIT_VALUE || ''; $('#s_cbal').value = c.CREDITS_BALANCE; $('#s_lb').value = c.LEADERBOARD_URL;
   for (const [id, k] of [['s_pwd', 'STEAM_PASSWORD'], ['s_shared', 'STEAM_SHARED_SECRET'], ['s_ident', 'STEAM_IDENTITY_SECRET']]) { $('#' + id).value = ''; $('#' + id).placeholder = c[k + '_SET'] ? '••••••• (enregistré)' : ''; }
+  $('#s_son').checked = c.SCHED_ON === '1'; $('#s_stime').value = c.SCHED_TIME || '03:00';
+  const sel = new Set((c.SCHED_TASKS || 'badges,cards,bot,balance,verify').split(','));
+  $('#s_stasks').innerHTML = [['badges', '🏅 Badges'], ['cards', '🃏 Cartes & sets'], ['boosters', '📦 Boosters / 💎 Gemmes'], ['bot', '🤖 Bot (SCE)'], ['balance', '💳 Solde'], ['friends', '👥 Amis'], ['verify', '✅ Vérifier les jeux']].map(([k, n]) => `<label class="check"><input type="checkbox" data-st="${k}" ${sel.has(k) ? 'checked' : ''}> ${n}</label>`).join('');
   markTheme(); renderUpdate(); renderSce(); $('#sdlg').showModal();
 }
 function download(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
@@ -580,7 +667,7 @@ $('#ssave').onclick = async (e) => {
   e.preventDefault();
   try {
     await api('/api/settings', { STEAM_PROFILE: $('#s_profile').value, STEAM_API_KEY: $('#s_key').value, CURRENCY: $('#s_cur').value, STEAM_ACCOUNT: $('#s_acc').value,
-      BOT_ONLY: $('#s_botonly').checked ? '1' : '0', AUTO_CARDS: $('#s_autocards').checked ? '1' : '0', CREDITS_BALANCE: $('#s_cbal').value.replace(',', '.'), CREDIT_VALUE: $('#s_cval').value.replace(',', '.'), LEADERBOARD_URL: $('#s_lb').value,
+      BOT_ONLY: $('#s_botonly').checked ? '1' : '0', AUTO_CARDS: $('#s_autocards').checked ? '1' : '0', CREDITS_BALANCE: $('#s_cbal').value.replace(',', '.'), CREDIT_VALUE: $('#s_cval').value.replace(',', '.'), SCHED_ON: $('#s_son').checked ? '1' : '0', SCHED_TIME: $('#s_stime').value || '03:00', SCHED_TASKS: [...document.querySelectorAll('#s_stasks [data-st]:checked')].map((x) => x.dataset.st).join(','), LEADERBOARD_URL: $('#s_lb').value,
       STEAM_PASSWORD: $('#s_pwd').value, STEAM_SHARED_SECRET: $('#s_shared').value, STEAM_IDENTITY_SECRET: $('#s_ident').value });
     $('#sdlg').close(); toast('Réglages enregistrés'); lastSig = ''; glob = null; poll();
   } catch (err) { toast(err.message, true); }

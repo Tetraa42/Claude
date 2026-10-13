@@ -89,4 +89,15 @@ function fillFriends(F, S) {
 function svgAvatar() {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120"><defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#66c0f4"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs><rect width="120" height="120" fill="url(#a)"/><circle cx="60" cy="46" r="22" fill="#fff" opacity=".9"/><path d="M16 112c4-30 26-40 44-40s40 10 44 40z" fill="#fff" opacity=".9"/></svg>`;
 }
-module.exports = { demoCredits, demoState, demoRank, fillFriends, svgCard, svgAvatar, svgBanner };
+// badges des amis (démo) : certains communs avec tes jeux, d'autres rares que tu n'as pas
+function demoBadges(S) {
+  const mine = S.sets.map((x) => x.appid), out = new Map();
+  ['76561198000000', '76561198000001', '76561198000002', '76561198000003', '76561198000004', '76561198000005'].forEach((_, i) => {
+    const id = '7656119800' + i, list = [];
+    mine.forEach((a, k) => { if ((k + i) % 2 === 0) list.push({ appid: a, level: 1 + ((k + i) % 4), xp: 100, scarcity: 20000 + k * 9000 }); });
+    for (let k = 0; k < 4; k++) list.push({ appid: 880000 + i * 10 + k, level: 1, xp: 100, scarcity: 300 + k * 2500 + i * 150 });
+    out.set(id, list);
+  });
+  return out;
+}
+module.exports = { demoBadges, demoCredits, demoState, demoRank, fillFriends, svgCard, svgAvatar, svgBanner };

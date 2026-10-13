@@ -131,3 +131,4 @@ dialog>form[method=dialog]{position:sticky;top:0;z-index:60;height:0}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:14px}.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px}
 .cbox{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:12px 14px}.cbox h4{margin:0 0 6px}.lc{width:100%;height:auto;display:block}.lcax{display:flex;justify-content:space-between;color:var(--mut);font-size:11px}
 .tgt{display:flex;align-items:center;gap:4px;color:var(--mut);font-size:12px}.tgt input{width:70px;padding:5px 8px}.ok{color:var(--ok,#22c55e)}
+.sec2{margin-top:14px}.cl{margin:0;padding-left:18px;max-height:260px;overflow:auto}.cl li{margin:2px 0}

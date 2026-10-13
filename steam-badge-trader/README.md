@@ -60,3 +60,9 @@ Pour ton vrai compte : copie `.env.example` en `.env`, mets ta clé API Steam (h
 - **💡 Bons plans** : cartes à acheter sur le marché Steam pour les revendre au bot (crédits par monnaie, gain net si la valeur d'un crédit est renseignée) et comparaison marché / bot pour compléter un set.
 - **🔔 Alertes de prix** : seuil sur une carte de la liste de souhaits, ou sur le coût d'un set entier (fiche du jeu).
 - **💾 Sauvegarde** (Réglages) : export/import JSON (souhaits, alertes, historique, préférences, réglages non secrets) et export CSV des sets.
+- **🎯 Objectif de niveau**, **🎴 cartes à récupérer en jouant** (bouton « Lancer le jeu », rappel quotidien) et **📅 soldes Steam** (dates indicatives, modifiables) dans l'onglet Progrès.
+- **♻ Doublons à revendre** (quoi vendre au bot pour financer le prochain set) et **💎 badges rares à viser** (d'après les badges de tes amis) dans Bons plans.
+- **💎 Rentabilité des boosters** (valeur des 3 cartes pour 1 000 gemmes) dans le catalogue de boosters.
+- **⚔ Comparaison avec un ami** (Classement → ⚔).
+- **⏰ Planificateur** (Réglages) : scans automatiques quotidiens quand l'app est ouverte.
+- **📒 Journal** des échanges, achats, ventes et fabrications (automatique pour les offres envoyées / boosters fabriqués, bouton « ✔ Fait » dans le plan d'échanges).
