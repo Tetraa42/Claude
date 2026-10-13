@@ -86,7 +86,7 @@ function saveState() {
   if (!S.demo && S.profile) recordHistory();
   if (S.demo || !S.profile) return; // rien d'utile à sauvegarder : on ne remplace surtout pas une bonne sauvegarde par un état vide
   try {
-    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, drops: [...S.drops], sets: S.sets, myCards: S.myCards, boosters: S.boosters, gems: S.gems, catalog: S.catalog, gemVal: S.gemVal, invT: S.invT, wishlist: S.wishlist, alerts: S.alerts, history: S.history, friends: friendsDump(), journal: S.journal, events: S.events, taskAt: Object.fromEntries(Object.entries(S.tasks).map(([k, t]) => [k, t.doneAt])),
+    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, drops: [...S.drops], sets: S.sets, myCards: S.myCards, boosters: S.boosters, gems: S.gems, catalog: S.catalog, gemVal: S.gemVal, invT: S.invT, wishlist: S.wishlist, alerts: S.alerts, history: S.history, names: [...S.names], friends: friendsDump(), journal: S.journal, events: S.events, taskAt: Object.fromEntries(Object.entries(S.tasks).map(([k, t]) => [k, t.doneAt])),
       rank: S.rank.list, rankT: S.rank.t });
   } catch {}
 }
@@ -95,7 +95,7 @@ function loadSaved() {
     const d = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
     if (d.v !== 2) return false;
     Object.assign(S, { drops: new Map(d.drops || []), profile: d.profile, completed: d.completed || [], sets: d.sets || [], myCards: d.myCards || [], boosters: d.boosters || [], updatedAt: d.t || 0, currency: d.currency || 3 });
-    S.gems = d.gems || { gems: 0, sacks: 0 }; S.invT = d.invT || 0; if (d.catalog) S.catalog = d.catalog; S.gemVal = d.gemVal || {}; S.wishlist = d.wishlist || []; S.alerts = d.alerts || []; friendsRestore(d.friends); S.history = d.history || []; S.journal = d.journal || []; S.events = d.events || null;
+    S.gems = d.gems || { gems: 0, sacks: 0 }; S.invT = d.invT || 0; if (d.catalog) S.catalog = d.catalog; S.gemVal = d.gemVal || {}; S.wishlist = d.wishlist || []; S.alerts = d.alerts || []; friendsRestore(d.friends); S.names = new Map(d.names || []); S.history = d.history || []; S.journal = d.journal || []; S.events = d.events || null;
     for (const [k, at] of Object.entries(d.taskAt || {})) if (S.tasks[k] && at) Object.assign(S.tasks[k], { state: 'done', pct: 100, doneAt: at }); // « dernier scan : il y a … »
     restoreBot(); // l'inventaire du bot est mémorisé à part (sce.json)
     S.rank.list = d.rank || []; S.rank.t = d.rankT || 0; S.rank.status = S.rank.list.length ? 'ready' : 'idle';
@@ -177,19 +177,20 @@ function ensureInventory(cfg) {
   if (S.invT && Date.now() - S.invT < 5 * 60e3) return Promise.resolve();
   if (invPromise) return invPromise;
   const id = runId, g0 = gens.inv || 0, group = ['boosters', 'gems'], dead = () => id !== runId || (gens.inv || 0) !== g0;
-  invPromise = steam.inTask('inv', async () => {
+  let me; // cette promesse : le finally ne doit pas effacer celle d'un lancement plus récent
+  me = invPromise = steam.inTask('inv', async () => {
     group.forEach((k) => begin(k, 'Lecture de ton inventaire Steam'));
     if (!running('cards')) begin('cards', 'Lecture de ton inventaire Steam');
     try {
       const sid = S.profile ? S.profile.steamid : await steam.resolveSteamId(cfg.profile, cfg.key);
       let inv;
-      try { inv = await steam.getInventory(sid, (loaded, total) => { const pct = total ? (100 * loaded) / total : 50; group.forEach((k) => prog(k, pct)); prog('cards', pct * 0.15); }); }
+      try { inv = await steam.getInventory(sid, (loaded, total) => { if (dead()) return; const pct = total ? (100 * loaded) / total : 50; group.forEach((k) => prog(k, pct)); prog('cards', pct * 0.15); }); }
       catch (e) { throw e.code === 'PRIVATE' ? new Error('Ton inventaire Steam est privé : passe-le en Public (Steam > Profil > Confidentialité > Inventaire).') : e; }
       if (dead()) return;
       S.myCards = inv.cards; S.boosters = inv.boosters; S.gems = { ...S.gems, ...inv.gems }; S.invT = Date.now();
       group.forEach((k) => finish(k)); saveState();
-    } catch (e) { group.forEach((k) => finish(k, e.message)); throw e; }
-    finally { invPromise = null; }
+    } catch (e) { if (dead()) return; group.forEach((k) => finish(k, e.message)); throw e; }
+    finally { if (invPromise === me) invPromise = null; }
   });
   return invPromise;
 }
@@ -265,13 +266,18 @@ async function run(cfg) { await scanBadges(cfg); if (S.profile && !S.demo) await
 
 // Remise à zéro complète (changement de compte) : annule les scans en cours.
 function reset() {
+  const wasDemo = S.demo;
   runId++; invPromise = null;
+  for (const k of ['badges', 'cards', 'inv', 'friends', 'verify', 'bot', 'balance']) bump(k); // les scans de l'ancien compte s'arrêtent
+  for (const k of ['cards', 'inv', 'friends', 'badges']) steam.cancelTask(k);
+  statsCache.clear();
+  if (wasDemo) Object.assign(S, { history: [], journal: [], events: null, wishlist: [], alerts: [] }); // données fictives de la démo
   Object.assign(S, { drops: new Map(), demo: false, running: false, refreshing: false, phase: '', done: 0, total: 0, error: null, profile: null, names: new Map(), myCards: [], boosters: [], sets: [], completed: [], updatedAt: 0, gems: { gems: 0, sacks: 0 }, invT: 0, catalog: { t: 0, gems: { total: 0, tradable: 0, untradable: 0 }, map: {} }, gemVal: {} });
   for (const t of Object.values(S.tasks)) Object.assign(t, { state: 'idle', pct: 0, label: '', eta: null, doneAt: 0, error: null, note: null });
   Object.assign(S.bot, { status: 'idle', error: null, apps: null, count: 0, games: 0, t: 0 });
   S.retry = { at: 0, n: 0 };
-  Object.assign(S.friends, { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map() });
-  Object.assign(S.rank, { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0 });
+  Object.assign(S.friends, { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map(), all: new Map(), log: {}, stats: null, t: 0 });
+  Object.assign(S.rank, { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0, badges: new Map() });
 }
 
 // Rafraîchit en arrière-plan les prix devenus trop vieux (le plus intéressant d'abord), sans bloquer l'affichage.
@@ -298,38 +304,46 @@ async function scanFriendsBody(cfg) {
   const F = S.friends;
   if (F.status === 'loading') return;
   const gen = bump('friends'), dead = () => gens.friends !== gen;
-  Object.assign(F, { status: 'loading', error: null, done: 0, total: 0, inv: new Map(), all: new Map(), log: {}, stats: { scanned: 0, private: 0, errors: 0, withCards: 0, cards: 0 } });
+  // les résultats se construisent à part et ne remplacent les anciens (complets) qu'à la fin d'une lecture réussie
+  const inv = new Map(), all = new Map(), log = {}, stats = { scanned: 0, private: 0, errors: 0, withCards: 0, cards: 0 };
+  Object.assign(F, { status: 'loading', error: null, done: 0, total: 0 });
   begin('friends', 'Lecture de ta liste d\'amis', 8);
   try {
-    if (S.demo) { F.total = F.list.length; demo.fillFriends(F, S); F.stats = { scanned: F.total, private: 0, errors: 0, withCards: F.total, cards: 12 }; finish('friends'); return; }
-    F.list = await steam.getFriends(cfg.key, S.profile.steamid);
-    F.total = F.list.length;
+    if (S.demo) { F.total = F.list.length; demo.fillFriends(F, S); F.stats = { scanned: F.total, private: 0, errors: 0, withCards: F.total, cards: 12 }; F.t = Date.now(); finish('friends'); return; }
+    const list = await steam.getFriends(cfg.key, S.profile.steamid);
+    F.total = list.length;
     prog('friends', 2, `Amis : 0/${F.total}`);
     while (S.running) await steam.sleep(2000); // on n'envoie pas deux rafales à Steam en même temps
     const wanted = new Set(S.sets.flatMap((s) => s.cards.filter((c) => !c.owned).map((c) => c.hash))), mineApps = new Set(S.sets.map((s) => s.appid));
-    if (S.sets.some((s) => s.provisional)) F.error = 'Tes sets ne sont pas encore tous analysés (prix en attente) : relance « Cartes & sets » pour voir toutes les cartes que tes amis ont.';
-    for (const f of F.list) {
+    let note = S.sets.some((s) => s.provisional) ? 'Tes sets ne sont pas encore tous analysés (prix en attente) : relance « Cartes & sets » pour voir toutes les cartes que tes amis ont.' : null, partial = false;
+    for (const f of list) {
       if (dead()) return;
       try {
         const every = await steam.getCards(f.steamid), cards = every.filter((c) => c.tradable && wanted.has(c.hash));
-        F.inv.set(f.steamid, groupBy(cards, (c) => c.hash));
+        inv.set(f.steamid, groupBy(cards, (c) => c.hash));
         const per = new Map(); // toutes ses cartes des jeux que tu collectionnes : sert à savoir ce dont IL a besoin
         for (const c of every) if (mineApps.has(c.appid)) (per.get(c.appid) || per.set(c.appid, new Set()).get(c.appid)).add(c.hash);
-        F.all.set(f.steamid, per);
-        F.log[f.steamid] = `${every.length} carte(s) en tout · ${cards.length} qui te manque(nt)`;
-        F.stats.scanned++; if (cards.length) { F.stats.withCards++; F.stats.cards += cards.length; }
+        all.set(f.steamid, per);
+        log[f.steamid] = `${every.length} carte(s) en tout · ${cards.length} qui te manque(nt)`;
+        stats.scanned++; if (cards.length) { stats.withCards++; stats.cards += cards.length; }
       } catch (e) {
         if (e.code === 'CANCELLED') return;
-        if (e.code === 'PRIVATE') { F.stats.private++; F.log[f.steamid] = 'inventaire privé (ou non lisible avec ta session Steam)'; } else { F.stats.errors++; F.error = e.message; F.log[f.steamid] = 'erreur : ' + e.message; if (/429/.test(e.message)) break; }
+        if (e.code === 'PRIVATE') { stats.private++; log[f.steamid] = 'inventaire privé (ou non lisible avec ta session Steam)'; }
+        else { stats.errors++; note = e.message; log[f.steamid] = 'erreur : ' + e.message; if (/429/.test(e.message)) { partial = true; break; } }
       }
       F.done++;
       prog('friends', (100 * F.done) / Math.max(1, F.total), `Amis : ${F.done}/${F.total}`);
       S.tasks.friends.eta = Math.ceil((F.total - F.done) * 3.2);
     }
-    F.status = 'ready'; F.t = Date.now(); finish('friends'); saveState();
+    if (dead()) return;
+    if (partial) { // Steam a freiné : lecture incomplète, on garde les anciennes données et on ne la compte pas comme « fraîche »
+      F.status = F.inv.size ? 'ready' : 'error'; F.error = note; finish('friends', 'Lecture partielle : ' + note); return;
+    }
+    Object.assign(F, { list, inv, all, log, stats, t: Date.now(), status: 'ready', error: note });
+    finish('friends'); saveState();
   } catch (e) {
     if (dead() || e.code === 'CANCELLED') return;
-    F.status = 'error'; F.error = e.code === 'PRIVATE' ? 'Ta liste d\'amis est privée (Steam > Confidentialité > Liste d\'amis : Public).' : e.message;
+    F.status = F.inv.size ? 'ready' : 'error'; F.error = e.code === 'PRIVATE' ? 'Ta liste d\'amis est privée (Steam > Confidentialité > Liste d\'amis : Public).' : e.message;
     finish('friends', F.error);
   }
 }
@@ -392,7 +406,7 @@ function cancel(k) {
   if (!S.tasks[k]) return; // tâche inconnue : rien à arrêter
   const group = ['cards', 'boosters', 'gems'].includes(k) ? ['cards', 'boosters', 'gems'] : [k];
   if (demoTimers[k]) { clearInterval(demoTimers[k]); delete demoTimers[k]; }
-  if (group.includes('cards')) { steam.cancelTask('cards'); steam.cancelTask('inv'); bump('cards'); bump('inv'); S.running = false; invPromise = null; }
+  if (group.includes('cards')) { steam.cancelTask('cards'); steam.cancelTask('inv'); bump('cards'); bump('inv'); S.running = false; invPromise = null; S.retry = { at: 0, n: 0 }; }
   else if (k === 'badges' || k === 'friends') { steam.cancelTask(k); bump(k); }
   else { bump(k); if (k === 'verify' && running('friends')) cancel('friends'); } // bot, solde, vérification (+ lecture des amis qui en fait partie) : la lecture déjà lancée se termine mais son résultat est ignoré
   for (const g of group) if (running(g)) Object.assign(S.tasks[g], { state: 'idle', pct: 0, eta: null, label: '', error: null, stopped: true });
@@ -525,7 +539,12 @@ function wishState() {
   });
 }
 // Vérifie les cartes souhaitées (page du jeu chez le bot, au plus une fois par heure et par jeu)
+let checkingWishes = false;
 async function checkWishes() {
+  if (checkingWishes) return; checkingWishes = true;
+  try { await checkWishesBody(); } finally { checkingWishes = false; }
+}
+async function checkWishesBody() {
   for (const appid of new Set([...S.wishlist.map((w) => w.appid), ...S.alerts.map((a) => a.appid)])) { // prix du marché des jeux surveillés (au plus une fois par heure)
     if (S.demo) continue;
     try {
@@ -561,10 +580,12 @@ function wishTarget(hash, target) {
   const t = Number(String(target).replace(',', '.')); w.target = t > 0 ? t : null; saveState();
 }
 function alertSet(appid, target) {
-  const set = S.sets.find((s) => s.appid === appid); if (!set) throw new Error('Jeu inconnu');
   const t = Number(String(target).replace(',', '.'));
-  S.alerts = S.alerts.filter((a) => a.appid !== appid);
-  if (t > 0) S.alerts.push({ appid, name: set.name, target: t, t: Date.now() });
+  S.alerts = S.alerts.filter((a) => a.appid !== appid); // retirer une alerte doit toujours marcher, même si le jeu n'est plus dans la liste
+  if (t > 0) {
+    const set = S.sets.find((s) => s.appid === appid); if (!set) throw new Error('Jeu inconnu');
+    S.alerts.push({ appid, name: set.name, target: t, t: Date.now() });
+  }
   saveState();
 }
 const alertsState = () => S.alerts.map((a) => { const s = S.sets.find((x) => x.appid === a.appid); const cost = s && s.cost != null ? s.cost : null; return { ...a, cost, hit: cost != null && cost > 0 && cost <= a.target, banner: header(a.appid) }; });
@@ -572,12 +593,13 @@ const alertsState = () => S.alerts.map((a) => { const s = S.sets.find((x) => x.a
 function exportData() { return { wishlist: S.wishlist, alerts: S.alerts, history: S.history, journal: S.journal, events: S.events, gemVal: S.gemVal }; }
 function importData(d) {
   if (!d || typeof d !== 'object') throw new Error('Fichier invalide');
-  if (Array.isArray(d.wishlist)) S.wishlist = d.wishlist.filter((w) => w && w.hash && w.name);
-  if (Array.isArray(d.alerts)) S.alerts = d.alerts.filter((a) => a && a.appid && a.target > 0);
-  if (Array.isArray(d.history)) S.history = d.history.filter((h) => h && h.t && h.xp != null).slice(-1500);
-  if (Array.isArray(d.journal)) S.journal = d.journal.filter((j) => j && j.id && j.t).slice(0, 1000);
-  if (Array.isArray(d.events)) S.events = d.events.filter((e) => e && e.name && e.start && e.end);
-  if (d.gemVal && typeof d.gemVal === 'object') S.gemVal = d.gemVal;
+  const str = (v, n = 200) => String(v == null ? '' : v).slice(0, n), numv = (v) => (Number.isFinite(+v) ? +v : 0);
+  if (Array.isArray(d.wishlist)) S.wishlist = d.wishlist.filter((w) => w && w.hash && w.name).map((w) => ({ hash: str(w.hash), name: str(w.name), img: str(w.img, 500), appid: numv(w.appid), game: str(w.game), t: numv(w.t), target: +w.target > 0 ? +w.target : null }));
+  if (Array.isArray(d.alerts)) S.alerts = d.alerts.filter((a) => a && a.appid && +a.target > 0).map((a) => ({ appid: numv(a.appid), name: str(a.name), target: +a.target, t: numv(a.t) }));
+  if (Array.isArray(d.history)) S.history = d.history.filter((h) => h && h.t && h.xp != null).slice(-1500).map((h) => ({ t: numv(h.t), level: numv(h.level), xp: numv(h.xp), badges: numv(h.badges), balance: h.balance == null ? null : numv(h.balance), gems: numv(h.gems) }));
+  if (Array.isArray(d.journal)) S.journal = d.journal.filter((j) => j && j.id && j.t).slice(0, 1000).map((j) => ({ id: str(j.id, 60), t: numv(j.t), type: ['trade', 'buy', 'sell', 'craft', 'other'].includes(j.type) ? j.type : 'other', text: str(j.text, 300), credits: numv(j.credits), auto: !!j.auto }));
+  if (Array.isArray(d.events)) S.events = d.events.filter((e) => e && e.name && /^\d{4}-\d{2}-\d{2}$/.test(String(e.start)) && /^\d{4}-\d{2}-\d{2}$/.test(String(e.end))).map((e) => ({ id: str(e.id || 'e' + Math.random(), 60), name: str(e.name, 80), start: e.start, end: e.end, approx: !!e.approx }));
+  if (d.gemVal && typeof d.gemVal === 'object') S.gemVal = Object.fromEntries(Object.entries(d.gemVal).map(([k, v]) => [String(k), numv(v)]));
   saveState();
 }
 const csvCell = (v) => { const t = v == null ? '' : String(v); return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
@@ -592,6 +614,7 @@ function goalPlan(target) {
   const p = S.profile; if (!p) throw new Error('Profil non chargé : lance le scan « Badges ».');
   target = Math.floor(Number(target));
   if (!(target > p.level)) throw new Error(`Choisis un niveau supérieur au tien (${p.level}).`);
+  if (target > p.level + 1000) throw new Error('Niveau visé trop élevé.');
   const need = totalXpForLevel(target) - p.xp;
   const lvl = levelsMap();
   const cand = S.sets.filter((s) => !s.provisional && s.cost != null && (lvl.get(s.appid) || 0) < 5)
@@ -629,7 +652,8 @@ const DEFAULT_EVENTS = [
 ];
 const eventsList = () => (S.events || DEFAULT_EVENTS).map((e) => ({ ...e, startMs: new Date(e.start + 'T18:00:00Z').getTime(), endMs: new Date(e.end + 'T18:00:00Z').getTime() })).filter((e) => e.endMs > Date.now()).sort((a, b) => a.startMs - b.startMs);
 function eventAdd(name, start, end) {
-  if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) throw new Error('Nom et dates (AAAA-MM-JJ) requis.');
+  if (!name || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || isNaN(new Date(start + 'T00:00:00Z')) || isNaN(new Date(end + 'T00:00:00Z'))) throw new Error('Nom et dates valides (AAAA-MM-JJ) requis.');
+  if (end < start) throw new Error('La fin doit être après le début.');
   S.events = [...(S.events || DEFAULT_EVENTS), { id: 'e' + Date.now(), name: String(name).slice(0, 80), start, end, approx: false }]; saveState();
 }
 const eventRemove = (id) => { S.events = (S.events || DEFAULT_EVENTS).filter((e) => e.id !== id); saveState(); };
@@ -703,10 +727,10 @@ function autoPlan(asks, giveIds) {
   let bal = data.balance; const trades = [];
   const pickCover = (need) => { // cartes les moins gaspilleuses pour couvrir `need` crédits (6 au maximum)
     const picked = []; let got = 0;
-    while (got < need && picked.length < MAXC) {
-      const rest = need - got, avail = pool.filter((g) => !picked.includes(g));
+    while (got < need - 1e-4 && picked.length < MAXC) {
+      const rest = need - got, avail = pool.filter((g) => g.worth > 0 && !picked.includes(g)); // une carte à 0 crédit ne paie rien
       if (!avail.length) break;
-      const exact = avail.filter((g) => g.worth >= rest).sort((a, b) => a.worth - b.worth)[0] || avail.sort((a, b) => b.worth - a.worth)[0];
+      const exact = avail.filter((g) => g.worth >= rest - 1e-4).sort((a, b) => a.worth - b.worth)[0] || avail.sort((a, b) => b.worth - a.worth)[0];
       picked.push(exact); got += exact.worth;
     }
     return { picked, got };
@@ -714,8 +738,9 @@ function autoPlan(asks, giveIds) {
   const botAsks = (asks || []).filter((a) => a.src === 'bot').map((a) => byHash.get(a.hash)).filter((w) => w && w.bot).sort((a, b) => a.appid - b.appid || b.bot.price - a.bot.price);
   for (let i = 0; i < botAsks.length; i += MAXC) {
     const chunk = botAsks.slice(i, i + MAXC), need = +chunk.reduce((t, w) => t + w.bot.price, 0).toFixed(2), toCover = Math.max(0, +(need - bal).toFixed(2));
-    const { picked, got } = toCover ? pickCover(toCover) : { picked: [], got: 0 }, feasible = got >= toCover;
-    if (feasible) { for (const g of picked) pool.splice(pool.indexOf(g), 1); bal = +(bal + got - need).toFixed(2); }
+    const { picked, got } = toCover > 1e-4 ? pickCover(toCover) : { picked: [], got: 0 }, feasible = got + 1e-4 >= toCover;
+    for (const g of picked) pool.splice(pool.indexOf(g), 1); // une carte n'apparaît que dans un seul échange, même si celui-ci est impossible
+    if (feasible) bal = +(bal + got - need).toFixed(2);
     const games = [...new Map(chunk.map((w) => [w.appid, { appid: w.appid, name: w.game, url: sce.gameUrl(w.appid), cards: [] }])).values()];
     for (const w of chunk) games.find((g) => g.appid === w.appid).cards.push(w.name);
     trades.push({ id: 'b' + i, kind: 'bot', asks: chunk.map((w) => ({ hash: w.hash, name: w.name, img: w.img, game: w.game, appid: w.appid, price: w.bot.price, tradeUrl: w.bot.tradeUrl })), gives: picked.map((g) => ({ assetid: g.assetid, name: g.name, img: g.img, game: g.game, worth: g.worth })),
@@ -771,6 +796,7 @@ function friendNeeds() {
 
 function loadDemo() {
   Object.assign(S, { demo: true, running: false, error: null }, demo.demoState()); demo.demoCredits(sce);
+  S.friends = { ...S.friends, inv: new Map(), all: new Map(), log: {}, stats: null, t: 0 }; S.rank = { ...S.rank, badges: new Map() }; // la démo remplace ces objets : on remet les champs que le reste du code attend
   S.gems = { gems: 4250, sacks: 2 }; demoCatalog();
   S.wishlist = []; S.alerts = []; S.journal = [{ id: 'j1', t: Date.now() - 86400e3 * 2, type: 'sell', text: 'Revente de 4 doublons au bot', credits: 24, auto: false }, { id: 'j2', t: Date.now() - 86400e3, type: 'buy', text: 'Set « Cave of Embers » (2 cartes)', credits: -15, auto: false }];
   S.history = Array.from({ length: 30 }, (_, i) => ({ t: Date.now() - (29 - i) * 86400e3, level: 23 + (i > 14 ? 1 : 0), xp: 3500 + i * 28 + (i % 4) * 9, badges: 40 + Math.floor(i / 4), balance: 4 + i * 0.3, gems: 3000 + i * 40 }));

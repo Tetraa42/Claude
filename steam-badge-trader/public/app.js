@@ -133,7 +133,7 @@ function drawWish() {
   if (box.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // on ne redessine pas pendant la saisie d'un prix
   box._sig = sig;
   const cards = w.length ? `<div class="flist">${w.map((x) => `<div class="frow ${x.available ? 'hit' : ''}"><img src="${esc(x.img)}" alt=""><div class="grow"><b>${esc(x.name)}</b> <small class="mut">· ${esc(x.game)}</small><br><small>${x.owned ? '✔ tu l\'as déjà' : x.available ? '🔔 ' + [x.bot && x.bot.stock > 0 ? `le bot l'a (${x.bot.stock} en stock${x.bot.price != null ? ', ' + x.bot.price + ' cr' : ''})` : '', x.friends.length ? `chez ${x.friends.map((f) => esc(f.name)).join(', ')}` : '', x.priceHit ? `prix atteint : ${money(x.price)}` : ''].filter(Boolean).join(' · ') : x.botChecked ? 'pas disponible pour le moment (vérifié)' : 'pas encore vérifié'}${x.price != null ? ` · marché ${money(x.price)}` : ''}</small><br><small class="cost" title="Coût d'achat de la carte chez le bot SteamCardExchange">🤖 coût : <b>${x.bot && x.bot.price != null ? x.bot.price + ' cr' : '? cr <span class="mut">(vérifie le jeu)</span>'}</b>${x.worth != null ? ` · le site la rachète ${x.worth} cr` : ''}</small></div>
-      <label class="tgt" title="M'avertir quand cette carte coûte moins que ce prix sur le marché">🔔 ≤ <input data-target="${esc(x.hash)}" inputmode="decimal" placeholder="prix" value="${x.target || ''}"></label>
+      <label class="tgt" title="M'avertir quand cette carte coûte moins que ce prix sur le marché">🔔 ≤ <input data-target="${esc(x.hash)}" inputmode="decimal" placeholder="prix" value="${esc(x.target || '')}"></label>
       ${x.bot && x.bot.stock > 0 ? `<a class="ghost sm" href="${esc(x.url)}" target="_blank" rel="noopener">Ouvrir chez le bot ↗</a>` : ''}<button class="ghost sm" data-unwish="${esc(x.hash)}">Retirer</button></div>`).join('')}</div>`
     : '<div class="sbox">Aucune carte surveillée. Ouvre un jeu et clique sur l\'étoile ☆ d\'une carte manquante : l\'app te prévient dès que le bot (ou un ami) l\'a, ou quand son prix passe sous le seuil que tu fixes.</div>';
   const sets = al.length ? `<h3 style="margin:18px 0 8px">🔔 Alertes de prix de sets</h3><div class="flist">${al.map((a) => `<div class="frow ${a.hit ? 'hit' : ''}"><div class="grow"><b>${esc(a.name)}</b><br><small>${a.hit ? '🔔 prix atteint : ' : 'coût actuel : '}${a.cost != null ? money(a.cost) : '–'} · seuil ${money(a.target)}</small></div><button class="ghost sm" data-unalert="${a.appid}">Retirer</button></div>`).join('')}</div>` : '';
@@ -291,9 +291,11 @@ async function openAuto() {
   const v = st.tasks.verify; if (v.state !== 'running' && !v.doneAt) startScan('verify'); // première ouverture : on vérifie les jeux tout de suite
   await loadAuto();
 }
+let autoLoading = false;
 async function loadAuto() {
+  if (autoLoading) return; autoLoading = true;
   try {
-    A.data = await api('/api/auto/data'); A.vAt = st.tasks.verify.doneAt;
+    A.vAt = st.tasks.verify.doneAt; A.data = await api('/api/auto/data');
     A.seen = A.seen || new Set(); // les cartes qui apparaissent après une vérification sont cochées d'office si leur set est complétable
     for (const w of A.data.wanted) {
       const def = w.bot ? 'bot' : w.friends[0].steamid;
@@ -303,9 +305,10 @@ async function loadAuto() {
     for (const h of [...A.ask.keys()]) if (!A.data.wanted.some((w) => w.hash === h)) A.ask.delete(h);
     A.init = true;
     await planAuto(); renderAuto();
-  } catch (e) { $('#abody').innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
+  } catch (e) { $('#abody').innerHTML = `<div class="errbox">${esc(e.message)}</div>`; } finally { autoLoading = false; }
 }
-async function planAuto() { A.plan = await api('/api/auto/plan', { asks: [...A.ask].map(([hash, src]) => ({ hash, src })), gives: [...A.give] }); }
+let planSeq = 0;
+async function planAuto() { const my = ++planSeq, r = await api('/api/auto/plan', { asks: [...A.ask].map(([hash, src]) => ({ hash, src })), gives: [...A.give] }); if (my === planSeq) A.plan = r; } // une réponse arrivée en retard n'écrase pas la plus récente
 function autoHead() {
   const v = st.tasks.verify, f = st.friends, d = A.data; if (!d) return '';
   const vtxt = v.state === 'running' ? `<div class="rbar"><i style="width:${v.pct}%"></i></div><small>${esc(v.label || 'Vérification…')} · ${v.pct}%${v.eta ? ' · ~' + v.eta + ' s' : ''}</small> <button class="ghost sm" data-ax="stop">■ Arrêter</button>`
@@ -485,7 +488,7 @@ const tradeUrl = (steamid) => `https://steamcommunity.com/tradeoffer/new/?partne
 // ---------- sets ----------
 function draw() {
   const q = $('#q').value.toLowerCase(), sort = $('#sort').value, wished = new Set((st.wishlist || []).map((w) => w.hash));
-  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botStock, s.friends.length, s.cost, s.worth, s.provisional, s.botChecked, s.botHas, s.friendsHave]), st.completed.length, [...basket].join(), (st.wishlist || []).map((w) => w.hash).join(), (st.allBadges || []).length, st.friends.stats && st.friends.stats.cards, st.progress.running]);
+  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botStock, s.friends.length, s.cost, s.worth, s.provisional, s.botChecked, s.botHas, s.friendsHave, s.dupes, s.nobody, s.drops, s.badgeLevel, s.cards.map((c) => c.owned + ':' + (c.botCard ? c.botCard.stock : '-')).join()]), st.completed.length, [...basket].join(), (st.wishlist || []).map((w) => w.hash).join(), (st.allBadges || []).length, st.friends.stats && st.friends.stats.cards, st.progress.running]);
   if (sig === lastSig) return; lastSig = sig;
   if (filter === 'done' || filter === 'allbadges') {
     const src = filter === 'done' ? st.completed : (st.allBadges || []);
@@ -764,7 +767,7 @@ function drawRank() {
   const m = $('#rmetric').value, box = $('#rbody');
   const table = (list) => `<table class="rank"><tr><th></th><th>Joueur</th><th>Niveau</th><th>Badges</th><th>Rareté</th></tr>${[...list].sort((a, b) => (b[m] || 0) - (a[m] || 0)).map((p, i) => `
     <tr class="${p.me ? 'me' : ''}"><td class="n">${['🥇', '🥈', '🥉'][i] || i + 1}</td><td><img src="${esc(p.avatar || '')}" alt="">${esc(p.name)}${p.me ? ' (toi)' : ''}</td>
-    <td class="${m === 'level' || m === 'xp' ? 'hl' : ''}">${p.level}${!p.me && rankTab === 'friends' ? ` <button class="ghost sm" data-cmp="${esc(p.steamid)}" title="Comparer tes badges avec ${esc(p.name)}">⚔</button>` : ''}</td><td class="${m === 'badgeCount' ? 'hl' : ''}">${nf(p.badgeCount)}</td><td class="${m === 'rarity' ? 'hl' : ''}">${nf(p.rarity)}${p.rareCount != null ? ` <small class="mut">· ${p.rareCount} rares</small>` : ''}</td></tr>`).join('')}</table>`;
+    <td class="${m === 'level' || m === 'xp' ? 'hl' : ''}">${esc(p.level)}${!p.me && rankTab === 'friends' ? ` <button class="ghost sm" data-cmp="${esc(p.steamid)}" title="Comparer tes badges avec ${esc(p.name)}">⚔</button>` : ''}</td><td class="${m === 'badgeCount' ? 'hl' : ''}">${nf(p.badgeCount)}</td><td class="${m === 'rarity' ? 'hl' : ''}">${nf(p.rarity)}${p.rareCount != null ? ` <small class="mut">· ${esc(p.rareCount)} rares</small>` : ''}</td></tr>`).join('')}</table>`;
   if (rankTab === 'friends') {
     const r = st.rank;
     const head = `<div class="row" style="margin-bottom:12px"><span class="mut">${r.status === 'loading' ? `Analyse ${r.done}/${r.total}…` : r.status === 'error' ? '⚠ ' + esc(r.error) : r.list.length ? `${r.list.length} joueurs` : 'Pas encore analysé'}</span><button class="ghost" id="rscan">${r.list.length ? '↻ Réanalyser' : '👥 Analyser mes amis'}</button></div>`;

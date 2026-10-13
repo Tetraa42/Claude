@@ -138,7 +138,7 @@ app.post('/api/import', (req, res) => {
   try {
     const d = req.body && req.body.data; if (!d || d.app !== 'steam-badge-trader') throw new Error('Ce fichier n\'est pas une sauvegarde de Steam Badge Trader.');
     engine.importData(d);
-    if (d.settings) { const ok = {}; for (const k of EXPORT_KEYS) if (k in d.settings && !['STEAM_PROFILE', 'CURRENCY'].includes(k)) ok[k] = d.settings[k]; config.save(DATA_DIR, ok); reloadEnv(); }
+    if (d.settings) { const ok = {}; for (const k of EXPORT_KEYS) if (k in d.settings && !['STEAM_PROFILE', 'CURRENCY', 'LEADERBOARD_URL'].includes(k)) ok[k] = String(d.settings[k]).slice(0, 200); config.save(DATA_DIR, ok); reloadEnv(); }
     res.json({ ok: true, wishlist: S.wishlist.length, alerts: S.alerts.length, history: S.history.length });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -187,10 +187,10 @@ app.post('/api/gems/value', async (req, res) => {
 app.post('/api/gems/craft', async (req, res) => {
   try {
     const appid = Number(req.body.appid), cat = S.catalog.map[appid];
-    if (isDemo()) { if (cat) S.catalog.gems.total -= cat.price; return res.json({ ok: true, totalGems: S.catalog.gems.total, demo: true }); }
+    if (isDemo()) { if (cat) { if (S.catalog.gems.total < cat.price) throw new Error(`Pas assez de gemmes : il en faut ${cat.price}, tu en as ${S.catalog.gems.total}.`); S.catalog.gems.total -= cat.price; } return res.json({ ok: true, totalGems: S.catalog.gems.total, demo: true }); }
     if (!cat) throw new Error('Prix inconnu : charge d\'abord le catalogue de boosters.');
     if (cat.unavailable) throw new Error('Ce booster n\'est pas disponible pour le moment (délai après une fabrication).');
-    if (S.catalog.gems.total && S.catalog.gems.total < cat.price) throw new Error(`Pas assez de gemmes : il en faut ${cat.price}, tu en as ${S.catalog.gems.total}.`);
+    if (S.catalog.gems.total < cat.price) throw new Error(`Pas assez de gemmes : il en faut ${cat.price}, tu en as ${S.catalog.gems.total}.`);
     const r = await trader.createBooster(appid);
     S.catalog.gems = { total: r.totalGems, tradable: r.tradableGems, untradable: r.untradableGems };
     engine.journalAdd({ type: 'craft', text: `Booster fabriqué : ${cat.name || 'jeu ' + appid} (${cat.price} gemmes)`, auto: true });
@@ -291,7 +291,8 @@ app.post('/api/trade/send', async (req, res) => {
     if (isDemo()) return res.json({ id: '000000', status: 'sent', note: 'Mode démo : aucune offre réelle envoyée.' });
     if (!Array.isArray(give)) throw new Error('Liste de cartes à donner invalide.');
     if (!Array.isArray(ask) || (!ask.length && !(req.body.gift && give.length))) throw new Error('Rien à demander : aucune carte manquante chez cette source.');
-    const mine = new Set(S.myCards.map((c) => String(c.assetid)));
+    const mine = new Set(S.myCards.filter((c) => c.tradable !== false).map((c) => String(c.assetid)));
+    if (new Set(give.map(String)).size !== give.length || new Set((ask || []).map(String)).size !== (ask || []).length) throw new Error('Une carte est présente deux fois dans l\'offre.');
     if (give.some((id) => !mine.has(String(id)))) throw new Error('Une carte à donner n\'est plus dans ton inventaire : clique sur Actualiser puis recommence.');
     const partner = source === 'friend' ? friendId : source === 'bot' ? (tradeUrl || env.BOT_TRADE_URL) : tradeUrl;
     if (!partner) throw new Error('Il manque le lien d\'échange du bot (Réglages) ou du partenaire.');

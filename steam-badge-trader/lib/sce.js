@@ -18,7 +18,7 @@ const empty = () => ({ balance: null, balanceT: 0, candidates: [], connected: fa
 const load = () => { if (!D) { try { D = Object.assign(empty(), JSON.parse(fs.readFileSync(file(), 'utf8'))); } catch { D = empty(); } } return D; };
 function flush() { clearTimeout(saveTimer); if (!D || demoOn) return; try { writeJsonAtomic(file(), D); } catch {} }
 const save = () => { clearTimeout(saveTimer); saveTimer = setTimeout(flush, 800); };
-const num = (t) => Number(String(t).replace(/[\s ]/g, '').replace(/,(?=\d{3}\b)/g, '').replace(',', '.'));
+const num = (t) => { const x = String(t).replace(/[\s\u00a0]/g, ''); return x === '' ? NaN : Number(x.replace(/,(?=\d{3}\b)/g, '').replace(',', '.')); }; // chaîne vide = pas un nombre
 const setBridge = (b) => { bridge = b; };
 const NO_SITE = 'Connexion SteamCardExchange disponible uniquement dans le logiciel installé.';
 
@@ -43,8 +43,8 @@ function findCredits(text) {
 function parseTrades(text) {
   const out = [];
   for (const l of String(text).split('\n')) {
-    const m = /^\s*(\d{6,})\s+(\d{2})\.(\d{2})\.(\d{4})\s*-\s*(\d{2}):(\d{2})\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+|-+)\s+(\w+)/.exec(l);
-    if (m) out.push({ id: m[1], t: Date.UTC(+m[4], +m[3] - 1, +m[2], +m[5], +m[6]), before: +m[7], yours: +m[8], bots: +m[9], after: /^\d/.test(m[10]) ? +m[10] : null, status: m[11] });
+    const m = /^\s*(\d{6,})\s+(\d{2})\.(\d{2})\.(\d{4})\s*-\s*(\d{2}):(\d{2})\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?)\s+(\d+(?:[.,]\d+)?|-+)\s+(\w+)/.exec(l);
+    if (m) out.push({ id: m[1], t: Date.UTC(+m[4], +m[3] - 1, +m[2], +m[5], +m[6]), before: num(m[7]), yours: num(m[8]), bots: num(m[9]), after: /^\d/.test(m[10]) ? num(m[10]) : null, status: m[11] });
   }
   return out;
 }
@@ -57,10 +57,11 @@ async function refreshBalance() {
   const prof = await bridge.scrape(PROFILE_URL); // la page Profile affiche le solde
   d.candidates = findCredits(prof.text).slice(0, 8);
   const pick = d.candidates.find((c) => /\d\s*credits/i.test(c.ctx)) || d.candidates[0]; // « 15 CREDITS » affiché sous ton pseudo
-  if (pick) { d.balance = pick.value; d.balanceT = Date.now(); d.connected = true; }
+  if (pick) { d.balance = pick.value; d.balanceT = Date.now(); d.connected = true; } else { d.balance = null; d.balanceT = 0; } // pas de valeur lisible : on n'invente pas un ancien solde
   d.trades = parseTrades(prof.text);
   d.debug = `CONNECTÉ: ${d.connected}\n\n--- PAGE PROFILE (début)\n${prof.text.slice(0, 3500)}\n\nVALEURS TROUVÉES: ${JSON.stringify(d.candidates)}`;
   save();
+  if (!pick) throw new Error(d.connected ? 'Solde illisible sur la page Profile : copie le diagnostic dans les Réglages.' : 'Pas connecté à SteamCardExchange : clique sur « Se connecter » dans les Réglages.');
   return status();
 }
 async function login() {
@@ -179,6 +180,7 @@ function parseGameText(text) {
     const name = lines[i - 1];
     let worth = null, price = null, quick = false, over = /overstock/i.test(lines[i]);
     for (let j = i + 1; j < Math.min(lines.length, i + 6) && !/^stock\s*:/i.test(lines[j]); j++) {
+      if (/^stock\s*:/i.test(lines[j + 1] || '')) break; // cette ligne est le NOM de la carte suivante, pas un détail de celle-ci
       if (/^worth/i.test(lines[j])) worth = val(lines[j]);
       else if (/^price/i.test(lines[j])) price = val(lines[j]);
       else if (/quick-?trade/i.test(lines[j])) quick = true;
@@ -221,8 +223,9 @@ const hasGame = (appid) => { const g = gameData(appid); return !!g && Object.key
 const cardInfo = (appid, name) => {
   const g = gameData(appid); if (!g) return null;
   const k = norm(name); if (g.cards[k]) return g.cards[k];
-  const hit = Object.keys(g.cards).find((x) => x.length > 3 && k.length > 3 && (x.endsWith(k) || k.endsWith(x))); // ex. « Gal DONALD MORDEN » (préfixe ajouté par le site)
-  return hit ? g.cards[hit] : null;
+  // à défaut : préfixe ajouté par le site (ex. « Gal DONALD MORDEN »), accepté seulement s'il est court et sans ambiguïté
+  const hits = Object.keys(g.cards).filter((x) => x.length > 3 && k.length > 3 && Math.abs(x.length - k.length) <= 4 && (x.endsWith(k) || k.endsWith(x)));
+  return hits.length === 1 ? g.cards[hits[0]] : null;
 };
 
 const trades = () => load().trades || [];

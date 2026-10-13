@@ -10,11 +10,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Annulation : chaque scan s'exécute dans un « contexte de tâche » ; si on clique sur Arrêter, ses requêtes en attente s'interrompent aussitôt.
 const { AsyncLocalStorage } = require('async_hooks');
 const als = new AsyncLocalStorage();
-const cancelled = new Set();
+const live = new Map(); // un jeton par lancement : relancer un scan juste après l'avoir arrêté n'annule pas le nouveau
 const cancelError = () => Object.assign(new Error('Arrêté'), { code: 'CANCELLED' });
-const isCancelled = () => { const c = als.getStore(); return !!c && cancelled.has(c.name); };
-const inTask = (name, fn) => { cancelled.delete(name); return als.run({ name }, fn); };
-const cancelTask = (name) => { cancelled.add(name); };
+const isCancelled = () => { const c = als.getStore(); return !!c && c.cancelled; };
+const inTask = (name, fn) => { const c = { name, cancelled: false }; live.set(name, c); return als.run(c, fn); };
+const cancelTask = (name) => { const c = live.get(name); if (c) c.cancelled = true; };
 async function csleep(ms) { // attente interruptible
   const end = Date.now() + ms;
   while (Date.now() < end) { if (isCancelled()) throw cancelError(); await sleep(Math.min(500, end - Date.now())); }
