@@ -116,13 +116,57 @@ function renderPlan(plan) {
 $('#ready').addEventListener('click', safe(async (e) => { const b = e.target.closest('[data-do]'); if (b) await startScan(b.dataset.do); }));
 // ---------- liste de souhaits ----------
 function drawWish() {
-  const w = st.wishlist || [], box = $('#wbody');
-  const sig = JSON.stringify(w); if (box._sig === sig) return; box._sig = sig;
-  box.innerHTML = w.length ? `<div class="flist">${w.map((x) => `<div class="frow ${x.available ? 'hit' : ''}"><img src="${esc(x.img)}" alt=""><div class="grow"><b>${esc(x.name)}</b> <small class="mut">· ${esc(x.game)}</small><br><small>${x.owned ? '✔ tu l\'as déjà' : x.available ? '🔔 ' + [x.bot && x.bot.stock > 0 ? `le bot l'a (${x.bot.stock} en stock${x.bot.price != null ? ', ' + x.bot.price + ' cr' : ''})` : '', x.friends.length ? `chez ${x.friends.map((f) => esc(f.name)).join(', ')}` : ''].filter(Boolean).join(' · ') : x.botChecked ? 'pas disponible pour le moment (vérifié)' : 'pas encore vérifié'}</small></div>${x.bot && x.bot.stock > 0 ? `<a class="ghost sm" href="${esc(x.url)}" target="_blank" rel="noopener">Ouvrir chez le bot ↗</a>` : ''}<button class="ghost sm" data-unwish="${esc(x.hash)}">Retirer</button></div>`).join('')}</div>`
-    : '<div class="sbox">Aucune carte surveillée. Ouvre un jeu et clique sur l\'étoile ☆ d\'une carte manquante : l\'app te prévient dès que le bot (ou un ami) l\'a.</div>';
+  const w = st.wishlist || [], al = st.alerts || [], box = $('#wbody');
+  const sig = JSON.stringify([w, al]); if (box._sig === sig) return;
+  if (box.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // on ne redessine pas pendant la saisie d'un prix
+  box._sig = sig;
+  const cards = w.length ? `<div class="flist">${w.map((x) => `<div class="frow ${x.available ? 'hit' : ''}"><img src="${esc(x.img)}" alt=""><div class="grow"><b>${esc(x.name)}</b> <small class="mut">· ${esc(x.game)}</small><br><small>${x.owned ? '✔ tu l\'as déjà' : x.available ? '🔔 ' + [x.bot && x.bot.stock > 0 ? `le bot l'a (${x.bot.stock} en stock${x.bot.price != null ? ', ' + x.bot.price + ' cr' : ''})` : '', x.friends.length ? `chez ${x.friends.map((f) => esc(f.name)).join(', ')}` : '', x.priceHit ? `prix atteint : ${money(x.price)}` : ''].filter(Boolean).join(' · ') : x.botChecked ? 'pas disponible pour le moment (vérifié)' : 'pas encore vérifié'}${x.price != null ? ` · marché ${money(x.price)}` : ''}</small></div>
+      <label class="tgt" title="M'avertir quand cette carte coûte moins que ce prix sur le marché">🔔 ≤ <input data-target="${esc(x.hash)}" inputmode="decimal" placeholder="prix" value="${x.target || ''}"></label>
+      ${x.bot && x.bot.stock > 0 ? `<a class="ghost sm" href="${esc(x.url)}" target="_blank" rel="noopener">Ouvrir chez le bot ↗</a>` : ''}<button class="ghost sm" data-unwish="${esc(x.hash)}">Retirer</button></div>`).join('')}</div>`
+    : '<div class="sbox">Aucune carte surveillée. Ouvre un jeu et clique sur l\'étoile ☆ d\'une carte manquante : l\'app te prévient dès que le bot (ou un ami) l\'a, ou quand son prix passe sous le seuil que tu fixes.</div>';
+  const sets = al.length ? `<h3 style="margin:18px 0 8px">🔔 Alertes de prix de sets</h3><div class="flist">${al.map((a) => `<div class="frow ${a.hit ? 'hit' : ''}"><div class="grow"><b>${esc(a.name)}</b><br><small>${a.hit ? '🔔 prix atteint : ' : 'coût actuel : '}${a.cost != null ? money(a.cost) : '–'} · seuil ${money(a.target)}</small></div><button class="ghost sm" data-unalert="${a.appid}">Retirer</button></div>`).join('')}</div>` : '';
+  box.innerHTML = cards + sets;
 }
-$('#wbody').addEventListener('click', safe(async (e) => { const b = e.target.closest('[data-unwish]'); if (b) { await api('/api/wish/remove', { hash: b.dataset.unwish }); poll(); } }));
+$('#wbody').addEventListener('click', safe(async (e) => {
+  const b = e.target.closest('[data-unwish]'); if (b) { await api('/api/wish/remove', { hash: b.dataset.unwish }); poll(); }
+  const u = e.target.closest('[data-unalert]'); if (u) { await api('/api/alert/set', { appid: u.dataset.unalert, target: 0 }); poll(); }
+}));
+$('#wbody').addEventListener('change', safe(async (e) => { const t = e.target.closest('[data-target]'); if (t) { await api('/api/wish/target', { hash: t.dataset.target, target: t.value }); toast(t.value ? `🔔 Alerte à ${t.value}` : 'Alerte retirée'); poll(); } }));
 $('#wcheck').onclick = safe(async () => { await api('/api/wish/check', {}); await poll(); toast('Liste de souhaits revérifiée'); });
+// ---------- progrès : historique et rythme ----------
+function lineChart(pts, key, color, fmt = (v) => nf(Math.round(v))) {
+  const d = pts.filter((p) => p[key] != null); if (d.length < 2) return '<p class="mut small">Pas encore assez de données.</p>';
+  const W = 560, H = 150, P = 8, t0 = d[0].t, t1 = d[d.length - 1].t || t0 + 1, vals = d.map((p) => p[key]);
+  const lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
+  const X = (t) => P + ((t - t0) / (t1 - t0 || 1)) * (W - 2 * P), Y = (v) => H - P - ((v - lo) / span) * (H - 2 * P);
+  const path = d.map((p, i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)},${Y(p[key]).toFixed(1)}`).join('');
+  const last = d[d.length - 1];
+  return `<svg viewBox="0 0 ${W} ${H}" class="lc" role="img"><path d="${path} L${X(last.t).toFixed(1)},${H - P} L${P},${H - P}Z" fill="${color}" opacity=".12"/><path d="${path}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${X(last.t).toFixed(1)}" cy="${Y(last[key]).toFixed(1)}" r="4" fill="${color}"/></svg>
+    <div class="lcax"><span>${fmt(lo)}</span><span>${new Date(t0).toLocaleDateString('fr-FR')} → ${new Date(t1).toLocaleDateString('fr-FR')}</span><span>${fmt(hi)}</span></div>`;
+}
+function drawProg() {
+  const h = st.history || [], pc = st.pace, box = $('#pbody');
+  const sig = JSON.stringify([h.length, h[h.length - 1], pc]); if (box._sig === sig) return; box._sig = sig;
+  if (h.length < 2) { box.innerHTML = '<div class="sbox">L\'historique se construit à chaque scan (niveau, XP, badges, crédits, gemmes). Reviens après quelques jours pour voir ta courbe et le rythme de progression.</div>'; return; }
+  const first = h[0], last = h[h.length - 1];
+  const eta = pc && pc.etaDays ? new Date(Date.now() + pc.etaDays * 86400e3).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : null;
+  box.innerHTML = `<div class="kpis"><div class="stat"><b>${last.level}</b><small>niveau actuel (+${last.level - first.level} depuis le début)</small></div><div class="stat"><b>+${nf(last.xp - first.xp)}</b><small>XP gagnée sur la période</small></div>
+    <div class="stat"><b>${pc && pc.xpPerDay ? pc.xpPerDay : '–'}</b><small>XP par jour (30 derniers jours)</small></div><div class="stat"><b>${eta || '–'}</b><small>${eta ? `niveau ${last.level + 1} estimé (dans ${pc.etaDays} j)` : 'niveau suivant : pas assez de données'}</small></div></div>
+    <div class="charts"><div class="cbox"><h4>XP</h4>${lineChart(h, 'xp', 'var(--ac)')}</div><div class="cbox"><h4>Badges</h4>${lineChart(h, 'badges', '#22c55e')}</div>
+    <div class="cbox"><h4>Crédits SCE</h4>${lineChart(h, 'balance', '#f59e0b', (v) => v.toFixed(1))}</div><div class="cbox"><h4>Gemmes</h4>${lineChart(h, 'gems', '#a855f7')}</div></div>`;
+}
+async function drawDeals() {
+  const box = $('#dbody'); box.innerHTML = '<p class="mut">Calcul…</p>';
+  try {
+    const d = await api('/api/deals'), cv = d.creditValue;
+    box.innerHTML = `${cv ? `<p class="mut small">1 crédit = ${money(cv)} (réglable dans ⚙ Réglages).</p>` : '<p class="mut small">💡 Indique la valeur d\'un crédit dans ⚙ Réglages pour voir le gain net et quelle voie est la moins chère.</p>'}
+    <h3 style="margin:10px 0 8px">Cartes à acheter sur le marché pour les revendre au bot</h3>
+    ${d.cards.length ? `<table class="cards"><tr><th>Carte</th><th>Jeu</th><th>Prix marché</th><th>Le bot donne</th><th>Crédits / ${st.currency === 3 ? '€' : st.currency === 2 ? '£' : '$'}</th>${cv ? '<th>Gain net</th>' : ''}</tr>${d.cards.map((c) => `<tr><td><img src="${esc(c.img)}" alt="" loading="lazy"> ${esc(c.name)}</td><td>${esc(c.game)}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.worth} cr</td><td><b>${c.ratio}</b></td>${cv ? `<td class="${c.net > 0 ? 'ok' : 'mut'}">${c.net > 0 ? '+' : ''}${money(c.net)}</td>` : ''}</tr>`).join('')}</table>` : '<div class="sbox">Pas encore de données : lance « Cartes & sets » et « Bot (SCE) ».</div>'}
+    <h3 style="margin:22px 0 8px">Compléter un set : marché Steam ou bot ?</h3>
+    ${d.sets.length ? `<table class="cards"><tr><th>Jeu</th><th>Manquantes</th><th>Marché Steam</th><th>Chez le bot</th>${cv ? '<th>Le moins cher</th>' : ''}</tr>${d.sets.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.missing}</td><td>${money(x.market)}</td><td>${x.bot} cr${cv ? ` (≈ ${money(x.botEuro)})` : ''}</td>${cv ? `<td>${x.cheaper === 'bot' ? '🤖 bot' : '🛒 marché'}</td>` : ''}</tr>`).join('')}</table>` : '<div class="sbox">Lance « ✅ Vérifier les jeux » : l\'app compare alors les sets que le bot peut compléter en entier.</div>'}`;
+  } catch (e) { box.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
+}
+$('#dreload').onclick = () => drawDeals();
 let wishSeen = new Set(lsGet('sbt.wishseen', []));
 function watchWishes() {
   const w = st.wishlist || [], n = w.filter((x) => x.available && !x.owned).length;
@@ -132,7 +176,12 @@ function watchWishes() {
     toast(`🔔 « ${x.name} » (${x.game}) est disponible !`);
     try { if (window.Notification && Notification.permission === 'granted') new Notification('Carte disponible', { body: `${x.name} — ${x.game}` }); } catch {}
   }
-  for (const h of [...wishSeen]) if (!w.some((x) => x.hash === h && x.available)) wishSeen.delete(h); // redevient indisponible : on réavertira
+  for (const a of st.alerts || []) {
+    const k = 'set-' + a.appid;
+    if (a.hit && !wishSeen.has(k)) { wishSeen.add(k); lsSet('sbt.wishseen', [...wishSeen]); toast(`🔔 Le set « ${a.name} » est passé à ${money(a.cost)} !`); try { if (window.Notification && Notification.permission === 'granted') new Notification('Prix du set atteint', { body: `${a.name} — ${money(a.cost)}` }); } catch {} }
+    if (!a.hit) wishSeen.delete(k);
+  }
+  for (const h of [...wishSeen]) if (!h.startsWith('set-') && !w.some((x) => x.hash === h && x.available)) wishSeen.delete(h); // redevient indisponible : on réavertira
 }
 try { if (window.Notification && Notification.permission === 'default') Notification.requestPermission(); } catch {}
 // bouton à remplissage pour une action sans progression connue (ex. lire une page du site) : le remplissage suit le temps estimé
@@ -195,8 +244,8 @@ function render() {
 
 function showView() {
   document.querySelectorAll('#views button[data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === view));
-  $('#v-sets').hidden = view !== 'sets'; $('#v-boosters').hidden = view !== 'boosters'; $('#v-rank').hidden = view !== 'rank'; $('#v-wish').hidden = view !== 'wish';
-  if (view === 'wish') drawWish(); if (view === 'sets') draw(); if (view === 'boosters') drawBoosters(); if (view === 'rank') drawRank();
+  $('#v-sets').hidden = view !== 'sets'; $('#v-boosters').hidden = view !== 'boosters'; $('#v-rank').hidden = view !== 'rank'; $('#v-wish').hidden = view !== 'wish'; $('#v-prog').hidden = view !== 'prog'; $('#v-deals').hidden = view !== 'deals';
+  if (view === 'prog') drawProg(); if (view === 'deals') drawDeals(); if (view === 'wish') drawWish(); if (view === 'sets') draw(); if (view === 'boosters') drawBoosters(); if (view === 'rank') drawRank();
 }
 $('#views').onclick = (e) => {
   const b = e.target.closest('button[data-v]'); if (b) { view = prefs.view = b.dataset.v; savePrefs(); lastSig = ''; showView(); if (view === 'rank' && rankTab === 'global') loadGlobal(); }
@@ -294,7 +343,7 @@ function renderDetail() {
      <div class="frow"><span>🤖</span><div class="grow"><b>${esc(d.bot.name)}</b><br><small>${s.botChecked ? (s.botHas ? `a ${s.botHas}/${missing.length} de tes cartes manquantes : ${s.cards.filter((c) => !c.owned && c.botCard && c.botCard.stock > 0).map((c) => esc(c.name)).join(', ')}` : 'n\'a aucune de tes cartes manquantes (vérifié carte par carte)') : d.bot.status !== 'ready' ? 'inventaire du bot non chargé : clique sur le bouton « Bot SteamCardExchange » en haut' : s.botStock ? `stock : ${s.botStock} carte(s) · ${s.botDistinct}/${s.total} différentes${s.botSets ? ` · ${s.botSets} set(s) complet(s) disponible(s)` : ''} · il te donne ${s.worth} crédit(s) par carte` : 'n\'a aucune carte de ce jeu en stock'}</small></div><a class="ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">Ouvrir sur le site ↗</a></div>
      ${s.friends.map((f) => `<div class="frow"><img src="${esc(f.avatar || '')}" alt=""><div class="grow"><b>${esc(f.name)}</b><br><small>a ${f.have.length}/${missing.length} : ${f.have.map((h) => esc((s.cards.find((c) => c.hash === h) || {}).name)).join(', ')}</small></div><button class="ghost sm" data-act="selfriend" data-f="${f.steamid}">⇄ Échanger</button></div>`).join('') || (st.friends.status === 'ready' ? '<p class="mut small">Aucun ami n\'a tes cartes manquantes.</p>' : '<p class="mut small">Clique sur « 👥 Amis » en haut pour voir qui a tes cartes.</p>')}
     </div>
-    <div class="row" style="margin-top:10px"><span><button class="ghost sm" data-act="selall">Tout sélectionner (manquantes)</button> <button class="ghost sm" data-act="selnone">Désélectionner</button></span></div></div>
+    <div class="row" style="margin-top:10px"><span><button class="ghost sm" data-act="selall">Tout sélectionner (manquantes)</button> <button class="ghost sm" data-act="selnone">Désélectionner</button> <button class="ghost sm" data-act="alert" title="M'avertir quand le coût du set passe sous un prix">🔔 Alerte prix du set</button></span></div></div>
   <div class="row xfoot"><span id="xcount"></span><button class="go" style="width:auto;padding:12px 24px;margin:0" data-act="trade">⇄ Lancer l'échange</button></div>`;
   renderBasket();
 }
@@ -307,6 +356,7 @@ $('#xbody').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]'); if (!b || !detail) return;
   const s = detail.set, missing = s.cards.filter((c) => !c.owned), act = b.dataset.act;
   if (act === 'selall') toggleCards(missing.map((c) => c.hash), true);
+  if (act === 'alert') { const v = prompt(`Prévenir quand le coût pour compléter « ${s.name} » passe sous (en ${st.currency === 3 ? '€' : st.currency === 2 ? '£' : '$'}) :`, s.cost ? (s.cost * 0.8).toFixed(2).replace('.', ',') : ''); if (v) { try { await api('/api/alert/set', { appid: s.appid, target: v }); toast('🔔 Alerte enregistrée'); poll(); } catch (err) { toast(err.message, true); } } }
   if (act === 'selnone') toggleCards(missing.map((c) => c.hash), false);
     if (act === 'selfriend') { const f = s.friends.find((x) => x.steamid === b.dataset.f); toggleCards(f.have, true); T.friendId = f.steamid; $('#xdlg').close(); openTrade(); return; }
   if (act === 'trade') { $('#xdlg').close(); openTrade(); }
@@ -512,15 +562,25 @@ async function openSettings() {
   const c = await api('/api/settings');
   $('#s_profile').value = c.STEAM_PROFILE; $('#s_key').value = c.STEAM_API_KEY; $('#s_cur').value = c.CURRENCY || '3'; $('#s_acc').value = c.STEAM_ACCOUNT;
   $('#s_botonly').checked = c.BOT_ONLY !== '0'; $('#s_autocards').checked = c.AUTO_CARDS === '1';
-  $('#s_cbal').value = c.CREDITS_BALANCE; $('#s_lb').value = c.LEADERBOARD_URL;
+  $('#s_cval').value = c.CREDIT_VALUE || ''; $('#s_cbal').value = c.CREDITS_BALANCE; $('#s_lb').value = c.LEADERBOARD_URL;
   for (const [id, k] of [['s_pwd', 'STEAM_PASSWORD'], ['s_shared', 'STEAM_SHARED_SECRET'], ['s_ident', 'STEAM_IDENTITY_SECRET']]) { $('#' + id).value = ''; $('#' + id).placeholder = c[k + '_SET'] ? '••••••• (enregistré)' : ''; }
   markTheme(); renderUpdate(); renderSce(); $('#sdlg').showModal();
 }
+function download(name, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+$('#exp').onclick = safe(async (e) => { e.preventDefault(); const d = await api('/api/export'); d.prefs = prefs; download('steam-badge-trader-sauvegarde.json', new Blob([JSON.stringify(d, null, 1)], { type: 'application/json' })); toast('Sauvegarde exportée'); });
+$('#expcsv').onclick = safe(async (e) => { e.preventDefault(); const r = await fetch('/api/export.csv'); download('steam-badge-trader-sets.csv', await r.blob()); toast('CSV exporté'); });
+$('#imp').onclick = (e) => { e.preventDefault(); $('#impfile').click(); };
+$('#impfile').onchange = safe(async () => {
+  const f = $('#impfile').files[0]; if (!f) return; $('#impfile').value = '';
+  let d; try { d = JSON.parse(await f.text()); } catch { throw new Error('Fichier illisible (JSON attendu)'); }
+  if (d.prefs && typeof d.prefs === 'object') { Object.assign(prefs, d.prefs); savePrefs(); }
+  const r = await api('/api/import', { data: d }); toast(`Importé : ${r.wishlist} souhait(s), ${r.alerts} alerte(s), ${r.history} point(s) d'historique`); poll();
+});
 $('#ssave').onclick = async (e) => {
   e.preventDefault();
   try {
     await api('/api/settings', { STEAM_PROFILE: $('#s_profile').value, STEAM_API_KEY: $('#s_key').value, CURRENCY: $('#s_cur').value, STEAM_ACCOUNT: $('#s_acc').value,
-      BOT_ONLY: $('#s_botonly').checked ? '1' : '0', AUTO_CARDS: $('#s_autocards').checked ? '1' : '0', CREDITS_BALANCE: $('#s_cbal').value.replace(',', '.'), LEADERBOARD_URL: $('#s_lb').value,
+      BOT_ONLY: $('#s_botonly').checked ? '1' : '0', AUTO_CARDS: $('#s_autocards').checked ? '1' : '0', CREDITS_BALANCE: $('#s_cbal').value.replace(',', '.'), CREDIT_VALUE: $('#s_cval').value.replace(',', '.'), LEADERBOARD_URL: $('#s_lb').value,
       STEAM_PASSWORD: $('#s_pwd').value, STEAM_SHARED_SECRET: $('#s_shared').value, STEAM_IDENTITY_SECRET: $('#s_ident').value });
     $('#sdlg').close(); toast('Réglages enregistrés'); lastSig = ''; glob = null; poll();
   } catch (err) { toast(err.message, true); }

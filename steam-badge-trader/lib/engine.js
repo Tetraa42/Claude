@@ -12,7 +12,7 @@ const BOT_DEFAULT = 'https://steamcommunity.com/id/CardExchange';
 const PRICE_TTL = 6 * 3600e3, BOT_TTL = 30 * 60e3, RANK_TTL = 3600e3;
 const S = {
   running: false, refreshing: false, phase: '', done: 0, total: 0, needFetch: 0, fetched: 0, error: null, profile: null, names: new Map(), myCards: [], boosters: [],
-  sets: [], wishlist: [], completed: [], drops: new Map(), updatedAt: 0, demo: false, currency: 3, botOnly: true,
+  sets: [], wishlist: [], alerts: [], history: [], completed: [], drops: new Map(), updatedAt: 0, demo: false, currency: 3, botOnly: true,
   bot: { status: 'idle', error: null, name: 'SteamCardExchange', count: 0, games: 0, t: 0 },
   retry: { at: 0, n: 0 }, gems: { gems: 0, sacks: 0 }, invT: 0, catalog: { t: 0, gems: { total: 0, tradable: 0, untradable: 0 }, map: {} }, gemVal: {},
   tasks: Object.fromEntries(['badges', 'cards', 'boosters', 'gems', 'bot', 'friends', 'balance', 'verify'].map((k) => [k, { state: 'idle', pct: 0, label: '', eta: null, estSec: 0, timeBased: false, t0: 0, doneAt: 0, error: null }])),
@@ -49,11 +49,30 @@ function provisionalSet({ appid, name, lvl, mine, bi }) {
 const upsert = (set) => { const i = S.sets.findIndex((s) => s.appid === set.appid); if (i >= 0) S.sets[i] = set; else S.sets.push(set); };
 const levelsMap = () => new Map((S.profile ? S.profile.badges : []).map((b) => [b.appid, b.level]));
 
+// ---------- historique de progression (niveau, XP, badges, crédits, gemmes) ----------
+function recordHistory() {
+  const p = S.profile; if (!p) return;
+  const pt = { t: Date.now(), level: p.level, xp: p.xp, badges: p.badgeCount || (p.badges || []).length, balance: sce.status().balance ?? null, gems: S.gems.gems + S.gems.sacks * 1000 };
+  const last = S.history[S.history.length - 1];
+  if (last && pt.t - last.t < 6 * 3600e3 && last.xp === pt.xp && last.balance === pt.balance && last.gems === pt.gems && last.badges === pt.badges) return;
+  if (last && pt.t - last.t < 30 * 60e3) S.history[S.history.length - 1] = pt; else S.history.push(pt);
+  if (S.history.length > 1500) S.history.splice(0, S.history.length - 1500);
+}
+// rythme de gain d'XP (par jour) sur les 30 derniers jours et date estimée du prochain niveau
+function pace(nextLevelXp) {
+  const h = S.history.filter((x) => Date.now() - x.t < 30 * 86400e3);
+  if (h.length < 2) return null;
+  const a = h[0], b = h[h.length - 1], days = (b.t - a.t) / 86400e3, gain = b.xp - a.xp;
+  if (days < 0.5 || gain <= 0) return { xpPerDay: 0, etaDays: null };
+  const xpPerDay = gain / days;
+  return { xpPerDay: +xpPerDay.toFixed(1), etaDays: nextLevelXp > 0 ? Math.ceil(nextLevelXp / xpPerDay) : null };
+}
 // ---------- sauvegarde / chargement ----------
 function saveState() {
+  if (!S.demo && S.profile) recordHistory();
   if (S.demo || !S.profile) return; // rien d'utile à sauvegarder : on ne remplace surtout pas une bonne sauvegarde par un état vide
   try {
-    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, drops: [...S.drops], sets: S.sets, myCards: S.myCards, boosters: S.boosters, gems: S.gems, catalog: S.catalog, gemVal: S.gemVal, invT: S.invT, wishlist: S.wishlist, taskAt: Object.fromEntries(Object.entries(S.tasks).map(([k, t]) => [k, t.doneAt])),
+    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, drops: [...S.drops], sets: S.sets, myCards: S.myCards, boosters: S.boosters, gems: S.gems, catalog: S.catalog, gemVal: S.gemVal, invT: S.invT, wishlist: S.wishlist, alerts: S.alerts, history: S.history, taskAt: Object.fromEntries(Object.entries(S.tasks).map(([k, t]) => [k, t.doneAt])),
       rank: S.rank.list, rankT: S.rank.t });
   } catch {}
 }
@@ -62,7 +81,7 @@ function loadSaved() {
     const d = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
     if (d.v !== 2) return false;
     Object.assign(S, { drops: new Map(d.drops || []), profile: d.profile, completed: d.completed || [], sets: d.sets || [], myCards: d.myCards || [], boosters: d.boosters || [], updatedAt: d.t || 0, currency: d.currency || 3 });
-    S.gems = d.gems || { gems: 0, sacks: 0 }; S.invT = d.invT || 0; if (d.catalog) S.catalog = d.catalog; S.gemVal = d.gemVal || {}; S.wishlist = d.wishlist || [];
+    S.gems = d.gems || { gems: 0, sacks: 0 }; S.invT = d.invT || 0; if (d.catalog) S.catalog = d.catalog; S.gemVal = d.gemVal || {}; S.wishlist = d.wishlist || []; S.alerts = d.alerts || []; S.history = d.history || [];
     for (const [k, at] of Object.entries(d.taskAt || {})) if (S.tasks[k] && at) Object.assign(S.tasks[k], { state: 'done', pct: 100, doneAt: at }); // « dernier scan : il y a … »
     restoreBot(); // l'inventaire du bot est mémorisé à part (sce.json)
     S.rank.list = d.rank || []; S.rank.t = d.rankT || 0; S.rank.status = S.rank.list.length ? 'ready' : 'idle';
@@ -455,21 +474,76 @@ function wishState() {
   return S.wishlist.map((w) => {
     const bc = sce.cardInfo(w.appid, w.name), set = S.sets.find((s) => s.appid === w.appid), mine = set ? (set.cards.find((c) => c.hash === w.hash) || {}).owned : 0;
     const friends = S.friends.list.filter((f) => (S.friends.inv.get(f.steamid) || new Map()).has(w.hash)).map((f) => ({ name: f.name, avatar: f.avatar, steamid: f.steamid }));
-    return { ...w, owned: mine || 0, bot: bc ? { stock: bc.stock, price: bc.price } : null, botChecked: !!bc, friends, available: !!(bc && bc.stock > 0) || friends.length > 0, url: sce.gameUrl(w.appid) };
+    const cur = set && set.cards.find((c) => c.hash === w.hash), price = cur && cur.price > 0 ? cur.price : null, priceHit = !!(w.target && price != null && price <= w.target);
+    return { ...w, price, priceHit, owned: mine || 0, bot: bc ? { stock: bc.stock, price: bc.price } : null, botChecked: !!bc, friends, available: !!(bc && bc.stock > 0) || friends.length > 0 || priceHit, url: sce.gameUrl(w.appid) };
   });
 }
 // Vérifie les cartes souhaitées (page du jeu chez le bot, au plus une fois par heure et par jeu)
 async function checkWishes() {
+  for (const appid of new Set([...S.wishlist.map((w) => w.appid), ...S.alerts.map((a) => a.appid)])) { // prix du marché des jeux surveillés (au plus une fois par heure)
+    if (S.demo) continue;
+    try {
+      const cur = S.sets.find((x) => x.appid === appid); if (!cur || Date.now() - (cur.priceT || 0) < 3600e3) continue;
+      const { set, t } = await steam.getSet(appid, S.currency, 3600e3);
+      if (set.length) upsert(buildSet({ appid, name: cur.name, lvl: levelsMap().get(appid) || 0, set, mine: S.myCards.filter((c) => c.appid === appid), t }));
+    } catch { /* prochain tour */ }
+  }
   for (const appid of new Set(S.wishlist.map((w) => w.appid))) {
     if (sce.gameAge(appid) < 3600e3) continue;
     try { if (S.demo) sce.demoGame(appid, (S.sets.find((s) => s.appid === appid) || { cards: [] }).cards.map((c) => c.name)); else await sce.checkGame(appid); } catch { /* prochain tour */ }
   }
 }
 
+// ---------- bons plans : acheter une carte sur le marché Steam et la revendre au bot en crédits ----------
+function deals(creditValue) {
+  const cv = Number(creditValue) > 0 ? Number(creditValue) : 0, cards = [];
+  for (const s of S.sets) {
+    if (s.provisional) continue;
+    const bi = sce.lookup(s.appid, s.name), worth = bi ? bi.worth : null; if (!worth) continue;
+    for (const c of s.cards) if (c.price > 0) cards.push({ appid: s.appid, game: s.name, name: c.name, img: c.img, price: c.price, priceText: c.priceText, worth, ratio: +(worth / c.price).toFixed(1), net: cv ? +(worth * cv - c.price).toFixed(3) : null, owned: c.owned });
+  }
+  cards.sort((a, b) => b.ratio - a.ratio);
+  // comparaison pour compléter un set : marché Steam (€) ou bot (crédits)
+  const sets = S.sets.filter((s) => !s.provisional && s.missingCount > 0 && verified(s.appid)).map((s) => enrichSet(s)).filter((s) => s.botBuy != null && s.botHas === s.missingCount)
+    .map((s) => ({ appid: s.appid, name: s.name, missing: s.missingCount, market: s.cost, bot: s.botBuy, botEuro: cv ? +(s.botBuy * cv).toFixed(2) : null, cheaper: cv ? (s.botBuy * cv < s.cost ? 'bot' : 'market') : null })).sort((a, b) => a.market - b.market);
+  return { creditValue: cv || null, cards: cards.slice(0, 40), sets };
+}
+
+// ---------- alertes de prix : cartes de la liste de souhaits et sets entiers ----------
+function wishTarget(hash, target) {
+  const w = S.wishlist.find((x) => x.hash === hash); if (!w) throw new Error('Carte absente de la liste de souhaits');
+  const t = Number(String(target).replace(',', '.')); w.target = t > 0 ? t : null; saveState();
+}
+function alertSet(appid, target) {
+  const set = S.sets.find((s) => s.appid === appid); if (!set) throw new Error('Jeu inconnu');
+  const t = Number(String(target).replace(',', '.'));
+  S.alerts = S.alerts.filter((a) => a.appid !== appid);
+  if (t > 0) S.alerts.push({ appid, name: set.name, target: t, t: Date.now() });
+  saveState();
+}
+const alertsState = () => S.alerts.map((a) => { const s = S.sets.find((x) => x.appid === a.appid); const cost = s && s.cost != null ? s.cost : null; return { ...a, cost, hit: cost != null && cost > 0 && cost <= a.target, banner: header(a.appid) }; });
+// ---------- sauvegarde / export ----------
+function exportData() { return { wishlist: S.wishlist, alerts: S.alerts, history: S.history, gemVal: S.gemVal }; }
+function importData(d) {
+  if (!d || typeof d !== 'object') throw new Error('Fichier invalide');
+  if (Array.isArray(d.wishlist)) S.wishlist = d.wishlist.filter((w) => w && w.hash && w.name);
+  if (Array.isArray(d.alerts)) S.alerts = d.alerts.filter((a) => a && a.appid && a.target > 0);
+  if (Array.isArray(d.history)) S.history = d.history.filter((h) => h && h.t && h.xp != null).slice(-1500);
+  if (d.gemVal && typeof d.gemVal === 'object') S.gemVal = d.gemVal;
+  saveState();
+}
+const csvCell = (v) => { const t = v == null ? '' : String(v); return /[;"\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+function setsCsv() {
+  const head = ['AppID', 'Jeu', 'Niveau badge', 'Cartes possédées', 'Cartes du set', 'Manquantes', 'Doublons', 'Coût (monnaie)', 'Valeur carte (crédits)', 'Stock bot', 'Achat chez le bot (crédits)', 'Prix du badge (crédits)'];
+  const rows = S.sets.map((s) => { const e = enrichSet(s); return [s.appid, s.name, s.badgeLevel, s.ownedUnique, s.total, s.missingCount, s.dupes, s.cost, e.worth, e.botStock, e.botBuy, e.badgePrice]; });
+  return '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(';')).join('\r\n');
+}
+
 function loadDemo() {
   Object.assign(S, { demo: true, running: false, error: null }, demo.demoState()); demo.demoCredits(sce);
   S.gems = { gems: 4250, sacks: 2 }; demoCatalog();
-  S.wishlist = [];
+  S.wishlist = []; S.alerts = [];
+  S.history = Array.from({ length: 30 }, (_, i) => ({ t: Date.now() - (29 - i) * 86400e3, level: 23 + (i > 14 ? 1 : 0), xp: 3500 + i * 28 + (i % 4) * 9, badges: 40 + Math.floor(i / 4), balance: 4 + i * 0.3, gems: 3000 + i * 40 }));
   for (const k of ['badges', 'cards', 'boosters', 'gems', 'bot', 'balance']) Object.assign(S.tasks[k], { state: 'done', pct: 100, doneAt: Date.now() - (k.length * 4 + 3) * 60e3, error: null });
 }
 
@@ -527,7 +601,7 @@ function snapshot(opt = {}) {
     bot: { status: B.status, error: B.error, name: B.name, count: B.count, games: B.games, botOnly: S.botOnly },
     friends: { status: F.status, error: F.error, done: F.done, total: F.total, count: F.list.length },
     rank: { status: S.rank.status, error: S.rank.error, done: S.rank.done, total: S.rank.total, list: S.rank.list },
-    ready: readiness(), wishlist: wishState(),
+    ready: readiness(), wishlist: wishState(), alerts: alertsState(), history: S.history, pace: p ? pace(totalXpForLevel(p.level + 1) - p.xp) : null,
     projection: p && { gainXp: gain, level: levelFromXp(p.xp + gain).level, nextLevelXp: totalXpForLevel(p.level + 1) - p.xp },
     credits: { balance: scest.balance != null ? scest.balance : manual, perCard: cpc || null, sce: scest, ownedValue, spareValue },
   };
@@ -569,4 +643,4 @@ function spareCards() {
   }
   return out;
 }
-module.exports = { S, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };
+module.exports = { S, deals, wishTarget, alertSet, exportData, importData, setsCsv, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };

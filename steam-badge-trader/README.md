@@ -56,3 +56,7 @@ Pour ton vrai compte : copie `.env.example` en `.env`, mets ta clé API Steam (h
 - Page d'un jeu chez le bot : lecture corrigée (blocs « Stock / Worth / Price »).
 - Amis de retour : cartes manquantes colorées (turquoise = chez le bot, violet = chez un ami, double contour = les deux), pastilles cliquables par carte (ami → page d'échange, bot → page du jeu chez le bot).
 - « Ouvrir un booster » ouvre l'inventaire Steam avec le booster déjà sélectionné.
+- **📈 Progrès** : courbes d'XP, badges, crédits et gemmes, rythme d'XP par jour et date estimée du prochain niveau.
+- **💡 Bons plans** : cartes à acheter sur le marché Steam pour les revendre au bot (crédits par monnaie, gain net si la valeur d'un crédit est renseignée) et comparaison marché / bot pour compléter un set.
+- **🔔 Alertes de prix** : seuil sur une carte de la liste de souhaits, ou sur le coût d'un set entier (fiche du jeu).
+- **💾 Sauvegarde** (Réglages) : export/import JSON (souhaits, alertes, historique, préférences, réglages non secrets) et export CSV des sets.

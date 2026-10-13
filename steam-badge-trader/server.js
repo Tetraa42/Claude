@@ -44,7 +44,7 @@ app.use((req, res, next) => {
   if (origin && origin.replace(/^https?:\/\//, '') !== host) return res.status(403).end('forbidden');
   next();
 });
-app.use(express.json());
+app.use(express.json({ limit: '5mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/art/avatar.svg', (_, res) => res.type('svg').send(demo.svgAvatar()));
 app.get('/art/banner/:appid.svg', (req, res) => res.type('svg').send(demo.svgBanner(req.params.appid)));
@@ -62,7 +62,7 @@ function ensureStarted() {
     engine.scanBadges(cfg()).then(() => { if (env.AUTO_CARDS === '1' && S.profile) engine.scanCards(cfg()); });
   } else if (env.AUTO_CARDS === '1' && !engine.isFresh()) engine.scanCards(cfg());
 }
-const settingsView = () => ({ creditsBalance: env.CREDITS_BALANCE, creditsPerCard: env.CREDITS_PER_CARD });
+const settingsView = () => ({ creditsBalance: env.CREDITS_BALANCE, creditsPerCard: env.CREDITS_PER_CARD, creditValue: env.CREDIT_VALUE });
 app.get('/api/state', (_, res) => {
   ensureStarted();
   res.json({ ...engine.snapshot(settingsView()), theme: env.THEME || 'nuit', seenSetup: env.SEEN_SETUP === '1', version: updater ? updater.status().version : null,
@@ -86,6 +86,27 @@ app.post('/api/scan/:task', (req, res) => {
 app.post('/api/wish/add', (req, res) => { try { engine.wishAdd(String(req.body.hash)); engine.checkWishes().catch(() => {}); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/wish/remove', (req, res) => { engine.wishRemove(String(req.body.hash)); res.json({ ok: true }); });
 app.post('/api/wish/check', async (_, res) => { await engine.checkWishes(); res.json({ ok: true }); });
+app.post('/api/wish/target', (req, res) => { try { engine.wishTarget(String(req.body.hash), req.body.target); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/alert/set', (req, res) => { try { engine.alertSet(Number(req.body.appid), req.body.target); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.get('/api/deals', (_, res) => res.json(engine.deals(env.CREDIT_VALUE)));
+// ---- sauvegarde / export ----
+const EXPORT_KEYS = ['STEAM_PROFILE', 'CURRENCY', 'THEME', 'BOT_ONLY', 'AUTO_CARDS', 'CREDITS_BALANCE', 'CREDITS_PER_CARD', 'CREDIT_VALUE', 'LEADERBOARD_URL']; // jamais de clé API ni de mot de passe dans l'export
+app.get('/api/export', (_, res) => {
+  res.setHeader('Content-Disposition', 'attachment; filename="steam-badge-trader-sauvegarde.json"');
+  res.json({ app: 'steam-badge-trader', v: 1, exportedAt: new Date().toISOString(), settings: Object.fromEntries(EXPORT_KEYS.filter((k) => env[k]).map((k) => [k, env[k]])), ...engine.exportData() });
+});
+app.get('/api/export.csv', (_, res) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="steam-badge-trader-sets.csv"');
+  res.send(engine.setsCsv());
+});
+app.post('/api/import', (req, res) => {
+  try {
+    const d = req.body && req.body.data; if (!d || d.app !== 'steam-badge-trader') throw new Error('Ce fichier n\'est pas une sauvegarde de Steam Badge Trader.');
+    engine.importData(d);
+    if (d.settings) { const ok = {}; for (const k of EXPORT_KEYS) if (k in d.settings && !['STEAM_PROFILE', 'CURRENCY'].includes(k)) ok[k] = d.settings[k]; config.save(DATA_DIR, ok); reloadEnv(); }
+    res.json({ ok: true, wishlist: S.wishlist.length, alerts: S.alerts.length, history: S.history.length });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.post('/api/scan/:task/cancel', (req, res) => { engine.cancel(req.params.task); res.json({ ok: true }); });
 app.post('/api/game/:appid/check', async (req, res) => { // vérification manuelle d'un jeu : stock du bot carte par carte + prix
   try { res.json(await engine.checkGameAll(Number(req.params.appid), cfg(), Number(env.CREDITS_PER_CARD) || 0, req.body && req.body.only)); }
@@ -242,7 +263,7 @@ app.post('/api/trade/send', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-const PUBLIC_KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL', 'THEME', 'BOT_ONLY', 'AUTO_CARDS', 'CREDITS_BALANCE', 'CREDITS_PER_CARD', 'LEADERBOARD_URL'];
+const PUBLIC_KEYS = ['STEAM_PROFILE', 'STEAM_API_KEY', 'CURRENCY', 'STEAM_ACCOUNT', 'BOT_PROFILE', 'BOT_TRADE_URL', 'THEME', 'BOT_ONLY', 'AUTO_CARDS', 'CREDITS_BALANCE', 'CREDITS_PER_CARD', 'CREDIT_VALUE', 'LEADERBOARD_URL'];
 app.get('/api/settings', (_, res) => {
   const out = {};
   for (const k of PUBLIC_KEYS) out[k] = env[k] || '';
