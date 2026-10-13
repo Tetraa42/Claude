@@ -25,6 +25,7 @@ const FILTERS = [
   ['bot', '🤖 En stock chez le bot', (s) => s.botStock > 0],
   ['botfull', '🤖 Set complet dispo', (s) => s.botSets > 0],
   ['friends', '👥 Chez des amis', (s) => s.friends.length > 0],
+  ['drops', '🎴 À récupérer en jouant', (s) => s.drops > 0],
   ['done', '🏆 Badges terminés', null],
 ];
 
@@ -34,6 +35,8 @@ async function api(u, o) {
   const r = await fetch(u, o !== undefined ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) } : undefined);
   const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j;
 }
+const hue = (t) => [...String(t)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
+window.fb = (img) => { const d = document.createElement('div'); d.className = 'banner phb'; d.style.setProperty('--h', hue(img.dataset.n)); d.textContent = img.dataset.n || ''; if (img.dataset.detail) d.dataset.detail = img.dataset.detail; img.replaceWith(d); };
 const setTheme = (t) => { document.documentElement.dataset.theme = t; lsSet('sbt.theme', t); };
 
 async function poll() {
@@ -68,7 +71,7 @@ function render() {
   if (p) {
     $('#avatar').src = p.avatar || ''; $('#avatar').hidden = !p.avatar; $('#name').innerHTML = `<a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.name)}</a>`;
     $('#sub').textContent = `${nf(p.xp)} XP · ${p.needed - p.intoLevel} XP avant le niveau ${p.level + 1}` + (st.demo ? ' · MODE DÉMO' : '');
-    $('#lvl').textContent = p.level; $('#ring').style.strokeDashoffset = 327 * (1 - p.intoLevel / p.needed);
+    $('#lvl').textContent = p.level; $('#ring').style.strokeDashoffset = 390 * (1 - p.intoLevel / p.needed); $('#lvxp').textContent = `${p.intoLevel} / ${p.needed} XP`;
     $('#proj').textContent = st.projection.level; $('#gain').textContent = '+' + st.projection.gainXp;
   } else $('#name').textContent = 'Lecture de ton profil Steam…';
   $('#tot').textContent = money(st.sets.reduce((t, s) => t + (s.cost || 0), 0));
@@ -92,7 +95,7 @@ function render() {
   $('#nboost').textContent = st.boosters.reduce((t, b) => t + b.count, 0) || '';
   const u = st.update, upd = $('#upd'); upd.hidden = !(u && ['available', 'downloading', 'ready'].includes(u.status));
   if (!upd.hidden) upd.textContent = u.status === 'ready' ? '↻ Redémarrer pour mettre à jour' : u.status === 'downloading' ? `⬇ Téléchargement ${u.progress}%` : '⬇ Mise à jour disponible';
-  $('#meta').textContent = st.updatedAt ? `Analyse du ${new Date(st.updatedAt).toLocaleString('fr-FR')} · tout est gardé en mémoire (fermer le logiciel ne perd rien)` : '';
+  $('#meta').textContent = (st.sets.length || st.completed.length ? `${st.sets.length} jeu(x) et ${st.completed.length} badge(s) terminé(s) en mémoire` : '') + (st.dropsTotal ? ` · 🎴 ${st.dropsTotal} carte(s) à récupérer en jouant sur ${st.dropsGames} jeu(x)` : '') + (st.updatedAt ? ` · analyse du ${new Date(st.updatedAt).toLocaleString('fr-FR')} · fermer le logiciel ne perd rien` : '');
   $('#chips').innerHTML = FILTERS.map(([k, label, fn]) => {
     const n = k === 'done' ? st.completed.length : st.sets.filter(fn).length;
     return `<button class="chip ${k === filter ? 'on' : ''}" data-f="${k}">${label} <i>${n}</i></button>`;
@@ -119,7 +122,8 @@ function draw() {
   if (filter === 'done') {
     $('#h2').innerHTML = 'Badges terminés <small>niveau 5 — 100 % · clique pour voir le détail</small>';
     $('#grid').innerHTML = st.completed.filter((b) => b.name.toLowerCase().includes(q)).map((b) => `
-      <article class="set done"><img class="banner" data-detail="${b.appid}" src="${esc(b.banner)}" alt="" onerror="this.remove()"><div class="body"><header><h3 data-detail="${b.appid}">${esc(b.name)}</h3><span class="pill ok">Niveau ${b.level} ✔</span></header>
+      <article class="set done"><img class="banner" data-n="${esc(b.name)}" data-detail="${b.appid}" src="${esc(b.banner)}" alt="" onerror="fb(this)"><div class="body"><header><h3 data-detail="${b.appid}">${esc(b.name)}</h3><span class="pill ok">Niveau ${b.level} ✔</span></header>
+      ${b.drops ? `<div class="tags"><span class="tag dr" title="Cartes qu'il te reste à obtenir en jouant à ce jeu">🎴 ${b.drops} carte(s) à récupérer en jouant</span></div>` : ''}
       <button class="cta" data-detail="${b.appid}">Voir les données</button></div></article>`).join('') || '<p class="empty">Aucun badge niveau 5 pour le moment.</p>';
     return;
   }
@@ -129,12 +133,12 @@ function draw() {
   const by = { cost: (a, b) => cc(a) - cc(b), missing: (a, b) => a.missingCount - b.missingCount || cc(a) - cc(b), pct: (a, b) => b.ownedUnique / b.total - a.ownedUnique / a.total, name: (a, b) => a.name.localeCompare(b.name) }[sort];
   const list = st.sets.filter((s) => fn(s) && s.name.toLowerCase().includes(q)).sort(by);
   $('#grid').innerHTML = list.map((s) => `
-  <article class="set"><img class="banner" data-detail="${s.appid}" src="${esc(s.banner)}" alt="" loading="lazy" onerror="this.remove()">
+  <article class="set"><img class="banner" data-n="${esc(s.name)}" data-detail="${s.appid}" src="${esc(s.banner)}" alt="" loading="lazy" onerror="fb(this)">
    <div class="body"><header><h3 data-detail="${s.appid}">${esc(s.name)}</h3><span class="pill">${s.badgeLevel ? 'Niv. ' + s.badgeLevel + ' → ' + (s.badgeLevel + 1) : 'Nouveau badge'}</span></header>
     <div class="fan">${s.cards.map((c) => c.unknown ? '<span class="ph" title="Carte pas encore connue"></span>' : `<img loading="lazy" src="${esc(c.img)}" title="${esc(c.name)} — ${esc(c.priceText || '')}${c.credits != null ? ' · ' + c.credits + ' crédit(s) chez le bot' : ''}" class="${c.owned ? '' : 'miss'}" alt="${esc(c.name)}">`).join('')}</div>
     <div class="meter"><i style="width:${(100 * s.ownedUnique) / s.total}%"></i></div>
     <div class="row"><span>${s.ownedUnique}/${s.total} cartes · ${s.dupes} doublon(s)</span><span>+100 XP</span></div>
-    <div class="tags">${s.botStock ? `<span class="tag bot" title="Cartes en stock chez le bot SteamCardExchange">🤖 stock ${s.botStock} · ${s.botDistinct}/${s.total} différentes${s.botSets ? ' · ' + s.botSets + ' set(s) complet(s)' : ''}</span>` : ''}${s.friends.length ? `<span class="tag fr">👥 ${s.friends.length} ami(s)</span>` : ''}${s.worth != null ? `<span class="tag cr" title="Crédits que le bot te donne pour une carte de ce jeu">💳 ${s.worth} crédit(s)/carte</span>` : ''}</div>
+    <div class="tags">${s.botStock ? `<span class="tag bot" title="Cartes en stock chez le bot SteamCardExchange">🤖 stock ${s.botStock} · ${s.botDistinct}/${s.total} différentes${s.botSets ? ' · ' + s.botSets + ' set(s) complet(s)' : ''}</span>` : ''}${s.friends.length ? `<span class="tag fr">👥 ${s.friends.length} ami(s)</span>` : ''}${s.drops ? `<span class="tag dr" title="Cartes qu'il te reste à obtenir en jouant à ce jeu">🎴 ${s.drops} à récupérer en jouant</span>` : ''}${s.worth != null ? `<span class="tag cr" title="Crédits que le bot te donne pour une carte de ce jeu">💳 ${s.worth} crédit(s)/carte</span>` : ''}</div>
     <div class="row"><span class="price ${s.cost === 0 ? 'free' : ''}">${s.cost == null ? '<small class="mut">prix en cours de lecture…</small>' : s.cost ? money(s.cost) : 'Prêt à crafter !'}${s.stale && !s.provisional ? ' <small title="prix en cours de rafraîchissement">~</small>' : ''}</span><a class="lnk" href="${esc(s.link)}" target="_blank" rel="noopener">Comparer sur SCE ↗</a></div>
     <button class="cta" data-app="${s.appid}">${s.cost == null ? '🔎 Voir le détail' : s.cost ? '⇄ Compléter par échange' : '🔨 Crafter le badge (Steam)'}</button></div>
   </article>`).join('') || `<p class="empty">${st.progress.running ? 'Analyse en cours, les sets apparaissent ici au fur et à mesure…' : 'Aucun set ne correspond à ce filtre.'}</p>`;
@@ -168,6 +172,7 @@ function renderDetail() {
     <div class="stat"><b>${s.worth != null ? s.worth : '–'}</b><small>crédits par carte (ce que le bot te donne)</small></div>
     <div class="stat"><b>${s.creditsOwned != null ? s.creditsOwned : '–'}</b><small>crédits pour tes ${s.cards.reduce((t, c) => t + c.owned, 0)} carte(s) de ce jeu</small></div>
     <div class="stat"><b>${s.botStock || 0}</b><small>carte(s) en stock chez le bot</small></div>
+    ${s.drops != null ? `<div class="stat"><b>${s.drops}</b><small>carte(s) encore à récupérer en jouant</small></div>` : ''}
   </div>
   ${d.boosters ? `<div class="xsec"><h4>📦 Boosters</h4><div class="bbox"><img src="${esc(d.boosters.img)}" alt=""><div class="grow"><b>${d.boosters.count} booster(s)</b> pour ce jeu<br><small class="mut">3 cartes au hasard — l'ouverture est définitive.</small></div><button class="cta" style="width:auto;padding:10px 18px" data-act="boost">📦 Ouvrir un booster</button></div></div>` : ''}
   <div class="xsec"><h4>Cartes <small class="mut">— coche celles à échanger (panier)</small></h4>
@@ -291,7 +296,7 @@ let bSig = '', rSig = '';
 function drawBoosters() {
   const sig = JSON.stringify(st.boosters); if (sig === bSig) return; bSig = sig;
   $('#bgrid').innerHTML = st.boosters.map((b) => `
-  <article class="set"><img class="banner" data-detail="${b.appid}" src="${esc(b.banner)}" alt="" onerror="this.remove()"><div class="body"><header><h3 data-detail="${b.appid}">${esc(b.game)}</h3><span class="pill">× ${b.count}</span></header>
+  <article class="set"><img class="banner" data-n="${esc(b.game)}" data-detail="${b.appid}" src="${esc(b.banner)}" alt="" onerror="fb(this)"><div class="body"><header><h3 data-detail="${b.appid}">${esc(b.game)}</h3><span class="pill">× ${b.count}</span></header>
     <div class="fan"><img src="${esc(b.img)}" alt="" style="width:96px;height:96px"></div>
     <button class="cta" data-boost="${b.appid}" data-asset="${b.assetid}">📦 Ouvrir un booster</button></div></article>`).join('') || '<p class="empty">Aucun booster dans ton inventaire.</p>';
 }
@@ -386,6 +391,11 @@ $('#ssave').onclick = async (e) => {
 };
 const cfgBtn = document.createElement('button'); cfgBtn.id = 'cfg'; cfgBtn.className = 'ghost'; cfgBtn.textContent = '⚙ Réglages'; $('#views').appendChild(cfgBtn); cfgBtn.onclick = openSettings;
 
+document.querySelectorAll('dialog').forEach((dlg) => dlg.addEventListener('click', (e) => { // un clic à l'extérieur de la fenêtre la ferme
+  if (e.target !== dlg || dlg.id === 'gdlg') return;
+  const r = dlg.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
+}));
 // restaure l'interface comme à la dernière fermeture
 $('#sort').value = prefs.sort; $('#rmetric').value = prefs.rankMetric;
 poll().then(() => { if (view === 'rank' && rankTab === 'global') loadGlobal(); if (st && st.demo && !st.seenSetup) { api('/api/settings', { SEEN_SETUP: '1' }); openSettings(); } });

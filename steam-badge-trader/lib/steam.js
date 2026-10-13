@@ -12,7 +12,12 @@ const rate = { waitUntil: 0 };
 let lastCommunity = 0;
 const gapFor = (url) => (url.includes('/market/search') ? 3000 : url.includes('/inventory/') ? 3000 : 1500); // Steam bloque (429) si on va plus vite
 
-async function jget(url) {
+// Dans le logiciel installé, les requêtes vers steamcommunity.com partent avec ta session Steam (celle de la connexion à SteamCardExchange) :
+// Steam est bien moins strict avec un compte connecté qu'avec une adresse anonyme.
+let authFetch = null;
+const setAuthFetch = (f) => { authFetch = f; };
+
+async function jget(url, asText = false) {
   const community = url.includes('steamcommunity.com');
   for (let attempt = 0; ; attempt++) {
     if (community) {
@@ -20,7 +25,9 @@ async function jget(url) {
       if (gap > 0) await sleep(gap);
       lastCommunity = Date.now();
     }
-    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 steam-badge-trader' } });
+    let r;
+    if (authFetch && community) { try { r = await authFetch(url); } catch { r = null; } }
+    if (!r) r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 steam-badge-trader' } });
     if (r.status === 429) {
       if (attempt >= 4) throw new Error('Steam limite toujours le débit (429). Patiente 5 minutes puis clique sur Actualiser : ce qui est déjà analysé est conservé.');
       const wait = [45, 90, 180, 300][attempt];
@@ -32,6 +39,7 @@ async function jget(url) {
     if (r.status === 403 || r.status === 401) { const e = new Error('Profil ou inventaire privé'); e.code = 'PRIVATE'; throw e; }
     if (!r.ok) throw new Error(`Steam a répondu HTTP ${r.status}`);
     const t = await r.text();
+    if (asText) return t;
     return t ? JSON.parse(t) : null;
   }
 }
@@ -76,6 +84,27 @@ async function getProfile(key, id) {
   const [[p = {}], b] = await Promise.all([getSummaries(key, [id]), getBadgeStats(key, id)]);
   const L = levelFromXp(b.xp);
   return { steamid: id, name: p.personaname || id, avatar: p.avatarfull, url: p.profileurl, ...b, intoLevel: L.intoLevel, needed: L.needed };
+}
+
+// Cartes encore à récupérer en jouant (« N card drops remaining ») : lues sur la page publique de tes badges.
+async function getBadgeDrops(id) {
+  const out = new Map();
+  let prevFirst = null;
+  for (let page = 1; page <= 10; page++) {
+    const html = await jget(`https://steamcommunity.com/profiles/${id}/badges/?l=english&p=${page}`, true);
+    const rows = String(html).split(/<div class="badge_row\b/).slice(1);
+    if (!rows.length) break;
+    const first = (/gamecards\/(\d+)/.exec(rows[0]) || [])[1];
+    if (first && first === prevFirst) break; // la page ne change plus
+    prevFirst = first;
+    for (const r of rows) {
+      const a = /gamecards\/(\d+)/.exec(r);
+      if (!a) continue;
+      const m = /(\d+)\s+card drops?\s+remaining/i.exec(r);
+      out.set(Number(a[1]), m ? Number(m[1]) : 0);
+    }
+  }
+  return out;
 }
 
 async function getOwnedNames(key, id) {
@@ -157,4 +186,4 @@ async function getSet(appid, currency, maxAge = Infinity) {
   return { set, fromCache: false, t: Date.now() };
 }
 
-module.exports = { rate, resolveSteamId, getSummaries, getProfile, getBadgeStats, getOwnedNames, getFriends, getInventory, getCards, getSet, cachedSet, flushCache, CDN, sleep, rarityPoints };
+module.exports = { rate, setAuthFetch, getBadgeDrops, resolveSteamId, getSummaries, getProfile, getBadgeStats, getOwnedNames, getFriends, getInventory, getCards, getSet, cachedSet, flushCache, CDN, sleep, rarityPoints };

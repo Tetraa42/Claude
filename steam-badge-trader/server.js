@@ -33,7 +33,7 @@ function submitIfJoined() {
 }
 let updater = null;
 const setUpdater = (u) => { updater = u; };
-const setSce = (b) => sce.setBridge(b);
+const setSce = (b) => { sce.setBridge(b); if (b.fetch) steam.setAuthFetch(b.fetch); };
 
 const app = express();
 // L'app n'écoute qu'en local ; on refuse aussi les requêtes venant d'un autre site (DNS rebinding / CSRF).
@@ -154,8 +154,11 @@ app.post('/api/trade/preview', async (req, res) => {
 
 // Fiche détaillée d'un badge / jeu : cartes, prix, crédits, boosters, bot, amis.
 app.get('/api/game/:appid', async (req, res) => {
-  try { res.json(await engine.gameDetail(Number(req.params.appid), cfg(), Number(env.CREDITS_PER_CARD) || 0)); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  const appid = Number(req.params.appid);
+  try {
+    if (isDemo() && !S.sets.some((x) => x.appid === appid)) throw new Error('Pas de détails pour ce jeu fictif en mode démo.');
+    res.json(await engine.gameDetail(appid, cfg(), Number(env.CREDITS_PER_CARD) || 0));
+  } catch (e) { res.status(400).json({ error: /fetch failed|ENOTFOUND|ECONN|ETIMEDOUT/i.test(e.message) ? 'Connexion à Steam impossible : vérifie ta connexion internet.' : e.message }); }
 });
 
 // ---- SteamCardExchange : crédits ----

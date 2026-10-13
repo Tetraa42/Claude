@@ -59,6 +59,7 @@ function demoState() {
     friends: { status: 'idle', error: null, done: 0, total: FRIENDS.length, list: FRIENDS.map((n, i) => ({ steamid: '7656119800' + i, name: n, avatar: '/art/avatar.svg' })), inv: new Map() },
     boosters: GAMES.slice(0, 3).flatMap((g, i) => Array.from({ length: i + 1 }, (_, k) => ({ assetid: `bo${g.appid}_${k}`, appid: g.appid, name: g.name + ' Booster Pack', game: g.name, img: cardUrl(g.appid, 4 + i), tradable: true }))),
     rank: { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0 },
+    drops: new Map(GAMES.map((g, i) => [g.appid, i % 3 === 0 ? 0 : (i % 3) + 1])),
     updatedAt: Date.now(), phase: '', done: 0, total: 0,
   };
 }

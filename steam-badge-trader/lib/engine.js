@@ -12,7 +12,7 @@ const BOT_DEFAULT = 'https://steamcommunity.com/id/CardExchange';
 const PRICE_TTL = 6 * 3600e3, BOT_TTL = 30 * 60e3, RANK_TTL = 3600e3;
 const S = {
   running: false, refreshing: false, phase: '', done: 0, total: 0, needFetch: 0, fetched: 0, error: null, profile: null, names: new Map(), myCards: [], boosters: [],
-  sets: [], completed: [], updatedAt: 0, demo: false, currency: 3, botOnly: true,
+  sets: [], completed: [], drops: new Map(), updatedAt: 0, demo: false, currency: 3, botOnly: true,
   bot: { status: 'idle', error: null, name: 'SteamCardExchange', count: 0, games: 0, t: 0 },
   retry: { at: 0, n: 0 },
   friends: { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map() },
@@ -52,7 +52,7 @@ const levelsMap = () => new Map((S.profile ? S.profile.badges : []).map((b) => [
 function saveState() {
   if (S.demo || !S.profile) return; // rien d'utile à sauvegarder : on ne remplace surtout pas une bonne sauvegarde par un état vide
   try {
-    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, sets: S.sets, myCards: S.myCards, boosters: S.boosters,
+    writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, drops: [...S.drops], sets: S.sets, myCards: S.myCards, boosters: S.boosters,
       rank: S.rank.list, rankT: S.rank.t });
   } catch {}
 }
@@ -60,7 +60,7 @@ function loadSaved() {
   try {
     const d = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
     if (d.v !== 2) return false;
-    Object.assign(S, { profile: d.profile, completed: d.completed || [], sets: d.sets || [], myCards: d.myCards || [], boosters: d.boosters || [], updatedAt: d.t || 0, currency: d.currency || 3 });
+    Object.assign(S, { drops: new Map(d.drops || []), profile: d.profile, completed: d.completed || [], sets: d.sets || [], myCards: d.myCards || [], boosters: d.boosters || [], updatedAt: d.t || 0, currency: d.currency || 3 });
     restoreBot(); // l'inventaire du bot est mémorisé à part (sce.json)
     S.rank.list = d.rank || []; S.rank.t = d.rankT || 0; S.rank.status = S.rank.list.length ? 'ready' : 'idle';
     return !!S.profile;
@@ -106,6 +106,7 @@ async function run(cfg, force = false) {
     if (stale()) return;
     S.myCards = inv.cards; S.boosters = inv.boosters;
     saveState();
+    try { S.phase = 'Lecture de tes badges (cartes à récupérer en jouant)'; const drops = await steam.getBadgeDrops(sid); if (stale()) return; if (drops.size) { S.drops = drops; saveState(); } } catch { /* facultatif : on continue sans */ }
 
     if (cfg.botOnly && !(S.bot.status === 'ready' && Date.now() - S.bot.t < BOT_TTL)) { S.phase = 'Lecture de l\'inventaire du bot (SteamCardExchange)'; await loadBot(); if (stale()) return; }
     const lvl = levelsMap();
@@ -161,7 +162,7 @@ async function run(cfg, force = false) {
 // Remise à zéro complète (changement de compte) : annule l'analyse en cours.
 function reset() {
   runId++;
-  Object.assign(S, { demo: false, running: false, refreshing: false, phase: '', done: 0, total: 0, error: null, profile: null, names: new Map(), myCards: [], boosters: [], sets: [], completed: [], updatedAt: 0 });
+  Object.assign(S, { drops: new Map(), demo: false, running: false, refreshing: false, phase: '', done: 0, total: 0, error: null, profile: null, names: new Map(), myCards: [], boosters: [], sets: [], completed: [], updatedAt: 0 });
   Object.assign(S.bot, { status: 'idle', error: null, apps: null, count: 0, games: 0, t: 0 });
   S.retry = { at: 0, n: 0 };
   Object.assign(S.friends, { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map() });
@@ -249,7 +250,7 @@ function enrichSet(s, cpc = 0) {
     return have.length ? { steamid: f.steamid, name: f.name, avatar: f.avatar, have } : null;
   }).filter(Boolean).sort((a, b) => b.have.length - a.have.length);
   const ownedCount = s.cards.reduce((t, c) => t + c.owned, 0);
-  return { ...s, cards, friends, worth, creditsOwned: worth != null ? +(worth * ownedCount).toFixed(2) : null,
+  return { ...s, drops: S.drops.has(s.appid) ? S.drops.get(s.appid) : null, cards, friends, worth, creditsOwned: worth != null ? +(worth * ownedCount).toFixed(2) : null,
     botStock: bi ? bi.stock : 0, botDistinct: bi ? Math.min(bi.distinct, s.total) : 0, botSets: bi ? bi.setsAvail : 0, botHas: bi ? Math.min(bi.distinct, missing.length) : 0,
     stale: Date.now() - (s.priceT || 0) > PRICE_TTL };
 }
@@ -266,7 +267,9 @@ function snapshot(opt = {}) {
   const ownedValue = hasInv && S.myCards.length ? valueOf(S.myCards) : null;        // ce que le bot te donnerait pour toutes tes cartes
   const spareValue = hasInv && S.myCards.length ? valueOf(spareCards()) : null;      // … pour tes seules cartes en trop
   return {
-    demo: S.demo, currency: S.currency, profile: p, sets, completed: S.completed, boosters, updatedAt: S.updatedAt,
+    demo: S.demo, currency: S.currency, profile: p, sets, boosters,
+    completed: S.completed.map((b) => ({ ...b, name: /^Jeu \d+$/.test(b.name) ? ((sce.lookup(b.appid) || {}).name || b.name) : b.name, drops: S.drops.has(b.appid) ? S.drops.get(b.appid) : null })), // nom manquant chez Steam : on prend celui de SteamCardExchange
+    dropsTotal: [...S.drops.values()].reduce((t, n) => t + n, 0), dropsGames: [...S.drops.values()].filter((n) => n > 0).length, updatedAt: S.updatedAt,
     progress: { running: S.running, refreshing: S.refreshing, phase: S.phase, done: S.done, total: S.total, fetchLeft, etaMin: Math.ceil((fetchLeft * 3.1) / 60),
       wait: Math.max(0, Math.round((steam.rate.waitUntil - Date.now()) / 1000)), retryIn: S.retry.at ? Math.max(0, Math.round((S.retry.at - Date.now()) / 1000)) : 0, error: S.error },
     bot: { status: B.status, error: B.error, name: B.name, count: B.count, games: B.games, botOnly: S.botOnly },

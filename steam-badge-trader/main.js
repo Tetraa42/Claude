@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu, dialog } = require('electron');
+const { app, BrowserWindow, shell, Menu, dialog, session } = require('electron');
 const path = require('path');
 
 process.env.BADGE_DATA_DIR = path.join(app.getPath('userData'), 'data'); // survit aux mises à jour du logiciel
@@ -34,6 +34,7 @@ const updater = autoUpdater && {
 
 // ---- SteamCardExchange : fenêtre de connexion + lecture du texte des pages (session persistante) ----
 const sceBridge = {
+  fetch: (url) => session.fromPartition('persist:sce').fetch(url, { credentials: 'include', headers: { 'Accept-Language': 'en' } }), // requêtes avec ta session Steam
   open: () => new Promise((resolve) => {
     const w = new BrowserWindow({ width: 1100, height: 800, title: 'SteamCardExchange — connecte-toi avec Steam puis ferme cette fenêtre', webPreferences: { partition: 'persist:sce' }, autoHideMenuBar: true });
     w.loadURL('https://www.steamcardexchange.net/'); w.on('closed', resolve);
