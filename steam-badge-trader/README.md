@@ -44,3 +44,9 @@ Pour ton vrai compte : copie `.env.example` en `.env`, mets ta clé API Steam (h
 - Crafter le badge se fait sur Steam (bouton ouvre la page du jeu).
 
 `.env` n'est jamais commité. Respecte les conditions d'utilisation de Steam ; n'échange qu'avec des partenaires de confiance.
+
+## Nouveautés
+- **■ Arrêter** un scan en cours (bouton carré sur chaque tuile, ou re-clic sur les boutons de vérification d'un jeu).
+- **✕** dans la barre de recherche pour la vider.
+- **💎 Gemmes** : valeur d'une carte en gemmes, prix du booster de chaque jeu, et fabrication d'un booster (onglet Boosters → « Charger les prix des boosters », ou depuis la fiche d'un jeu). Une confirmation est demandée et la connexion Steam est nécessaire.
+- Prix **achat / revente** de chaque carte chez le bot SteamCardExchange, coût total de tes manquantes en crédits, valeur de tes doublons et prix du badge affiché sur le site.

@@ -102,3 +102,7 @@ dialog>form[method=dialog]{position:sticky;top:0;z-index:60;height:0}
 .scan:hover:not(:disabled){border-color:var(--ac)}.scan:disabled{opacity:1}
 .scan.sm{min-height:50px;padding:8px 12px}.checks{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}
 .gemsbar{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px}.gem{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:10px 16px}.gem b{font-size:20px;display:block}.gem small{color:var(--mut)}
+.search{position:relative;display:flex;flex:1;min-width:160px}.search input{width:100%;padding-right:32px}
+.qx{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:50%;border:0;background:var(--line);color:var(--tx);font-size:11px;line-height:1;cursor:pointer;padding:0}.qx:hover{background:var(--ac)}.qx[hidden]{display:none}
+.scan .stop{display:none;position:relative;width:26px;height:26px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:#ef4444;font-size:12px;cursor:pointer;padding:0;flex:none}
+.scan.running .stop{display:block}.scan .stop:hover{background:#ef4444;color:#fff}

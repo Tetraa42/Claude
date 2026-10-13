@@ -9,6 +9,7 @@ const dir = () => process.env.BADGE_DATA_DIR;
 const file = () => path.join(dir(), 'sce.json');
 const HOME = 'https://www.steamcardexchange.net/';
 const INV_URL = HOME + 'index.php?inventory';
+const BP_URL = HOME + 'index.php?badgeprices';
 const PROFILE_URL = HOME + 'index.php?profile';
 const INV_TTL = 30 * 60e3;
 
@@ -87,6 +88,31 @@ async function readInventory(force = false) {
   save();
   return d.inv;
 }
+// ---- prix des badges (set complet) affichés sur le site ----
+const price = (t) => num(String(t).replace(/[^\d.,-]/g, ''));
+async function readBadgePrices(force = false) {
+  const d = load();
+  if (!force && d.bp && Date.now() - d.bp.t < 6 * 3600e3) return d.bp;
+  if (!bridge) throw new Error(NO_SITE);
+  const r = await bridge.scrape(BP_URL, { table: true });
+  const head = r.head || [];
+  const iPrice = head.findIndex((h) => /price/i.test(h));
+  const rows = [];
+  for (const x of r.rows || []) {
+    const c = x.c || [];
+    const m0 = /(\d{3,9})/.exec(String(x.h || ''));
+    const iName = c.findIndex((v) => v && isNaN(num(v)) && !/^[$€£]/.test(v));
+    if (iName < 0) continue;
+    const p = price(iPrice >= 0 ? c[iPrice] : (c.find((v) => /^[$€£]\s*[\d.,]+/.test(v)) || ''));
+    if (isNaN(p)) continue;
+    rows.push({ appid: m0 ? Number(m0[1]) : null, name: c[iName], price: p });
+  }
+  d.bp = { t: Date.now(), rows };
+  d.debug = (d.debug || '') + `\n\nPRIX DES BADGES: ${rows.length} lignes · en-têtes ${JSON.stringify(head)} · exemple ${JSON.stringify(rows[0] || null)}`;
+  save();
+  if (!rows.length) throw new Error('Prix des badges illisibles');
+  return d.bp;
+}
 const norm = (n) => String(n || '').toLowerCase().replace(/\(non-marketable\)/g, '').normalize('NFKD').replace(/[^\p{L}\p{N}]/gu, '');
 let idx = { inv: null, byApp: new Map(), byName: new Map(), stocked: 0 }; // la table fait ~15 000 lignes : on ne l'indexe que si elle change
 function index() {
@@ -99,6 +125,13 @@ function index() {
   return idx;
 }
 const lookup = (appid, name) => { const i = index(); return i.byApp.get(appid) || (name ? i.byName.get(norm(name)) : null) || null; };
+let bpIdx = { bp: null, byApp: new Map(), byName: new Map() };
+function bpIndex() {
+  const bp = load().bp;
+  if (bpIdx.bp !== bp) { const byApp = new Map(), byName = new Map(); for (const r of (bp && bp.rows) || []) { if (r.appid) byApp.set(r.appid, r); const k = norm(r.name); if (k && !byName.has(k)) byName.set(k, r); } bpIdx = { bp, byApp, byName }; }
+  return bpIdx;
+}
+const badgePrice = (appid, name) => { const i = bpIndex(); return i.byApp.get(appid) || (name ? i.byName.get(norm(name)) : null) || null; };
 const hasData = () => { const inv = load().inv; return !!(inv && inv.rows.length); };
 const totals = () => { const i = index(); return { games: i.stocked, cards: ((i.inv && i.inv.rows) || []).reduce((t, r) => t + (r.stock || 0), 0) }; };
 
@@ -146,4 +179,4 @@ const status = () => { const d = load(); return { available: !!bridge || demoOn,
   games: index().stocked, invAge: d.inv ? d.inv.t : 0, hasDebug: !!d.debug }; };
 const debug = () => load().debug || '';
 const reset = () => { if (demoOn) { demoOn = false; D = null; } };
-module.exports = { setBridge, login, refreshBalance, readInventory, checkGame, demoGame, hasGame, cardInfo, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };
+module.exports = { setBridge, login, refreshBalance, readInventory, readBadgePrices, badgePrice, checkGame, demoGame, hasGame, cardInfo, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };

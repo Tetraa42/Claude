@@ -7,6 +7,19 @@ const CDN = 'https://community.cloudflare.steamstatic.com/economy/image/';
 const dataDir = () => process.env.BADGE_DATA_DIR || path.join(__dirname, '..', 'data');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Annulation : chaque scan s'exécute dans un « contexte de tâche » ; si on clique sur Arrêter, ses requêtes en attente s'interrompent aussitôt.
+const { AsyncLocalStorage } = require('async_hooks');
+const als = new AsyncLocalStorage();
+const cancelled = new Set();
+const cancelError = () => Object.assign(new Error('Arrêté'), { code: 'CANCELLED' });
+const isCancelled = () => { const c = als.getStore(); return !!c && cancelled.has(c.name); };
+const inTask = (name, fn) => { cancelled.delete(name); return als.run({ name }, fn); };
+const cancelTask = (name) => { cancelled.add(name); };
+async function csleep(ms) { // attente interruptible
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (isCancelled()) throw cancelError(); await sleep(Math.min(500, end - Date.now())); }
+}
+
 // Quand Steam limite le débit (429) on attend puis on reprend : rien n'est perdu.
 const rate = { waitUntil: 0 };
 let lastCommunity = 0;
@@ -20,9 +33,10 @@ const setAuthFetch = (f) => { authFetch = f; };
 async function jget(url, asText = false) {
   const community = url.includes('steamcommunity.com');
   for (let attempt = 0; ; attempt++) {
+    if (isCancelled()) throw cancelError();
     if (community) {
       const gap = gapFor(url) - (Date.now() - lastCommunity);
-      if (gap > 0) await sleep(gap);
+      if (gap > 0) await csleep(gap);
       lastCommunity = Date.now();
     }
     let r;
@@ -32,8 +46,7 @@ async function jget(url, asText = false) {
       if (attempt >= 4) throw new Error('Steam limite toujours le débit (429). Patiente 5 minutes puis clique sur Actualiser : ce qui est déjà analysé est conservé.');
       const wait = [45, 90, 180, 300][attempt];
       rate.waitUntil = Date.now() + wait * 1000;
-      await sleep(wait * 1000);
-      rate.waitUntil = 0;
+      try { await csleep(wait * 1000); } finally { rate.waitUntil = 0; }
       continue;
     }
     if (r.status === 403 || r.status === 401) { const e = new Error('Profil ou inventaire privé'); e.code = 'PRIVATE'; throw e; }
@@ -191,4 +204,4 @@ async function getSet(appid, currency, maxAge = Infinity) {
   return { set, fromCache: false, t: Date.now() };
 }
 
-module.exports = { rate, setAuthFetch, getBadgeDrops, resolveSteamId, getSummaries, getProfile, getBadgeStats, getOwnedNames, getFriends, getInventory, getCards, getSet, cachedSet, flushCache, CDN, sleep, rarityPoints };
+module.exports = { inTask, cancelTask, isCancelled, rate, setAuthFetch, getBadgeDrops, resolveSteamId, getSummaries, getProfile, getBadgeStats, getOwnedNames, getFriends, getInventory, getCards, getSet, cachedSet, flushCache, CDN, sleep, rarityPoints };

@@ -82,6 +82,7 @@ app.post('/api/scan/:task', (req, res) => {
   if (isDemo()) engine.demoScan(k); else Promise.resolve(fn()).catch((e) => { S.error = e.message; });
   res.json({ ok: true });
 });
+app.post('/api/scan/:task/cancel', (req, res) => { engine.cancel(req.params.task); res.json({ ok: true }); });
 app.post('/api/game/:appid/check', async (req, res) => { // vérification manuelle d'un jeu : stock du bot carte par carte + prix
   try { res.json(await engine.checkGameAll(Number(req.params.appid), cfg(), Number(env.CREDITS_PER_CARD) || 0, req.body && req.body.only)); }
   catch (e) { res.status(400).json({ error: e.message }); }
@@ -102,6 +103,38 @@ app.post('/api/boosters/open', async (req, res) => {
     if (i >= 0) S.boosters.splice(i, 1);
     engine.saveState();
     res.json({ cards });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ---- gemmes : prix des boosters, valeur d'une carte, fabrication d'un booster ----
+app.post('/api/gems/catalog', async (_, res) => {
+  try {
+    if (isDemo()) { engine.demoCatalog(); return res.json({ ok: true }); }
+    engine.setCatalog(await trader.boosterCatalog()); res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.get('/api/gems/list', (_, res) => res.json({ t: S.catalog.t, gems: S.catalog.gems, list: engine.catalogList() }));
+app.post('/api/gems/value', async (req, res) => {
+  try {
+    const appid = Number(req.body.appid);
+    if (isDemo()) { if (S.gemVal[appid] == null) engine.setGemValue(appid, 12); return res.json({ gemValue: S.gemVal[appid] }); }
+    const card = S.myCards.find((c) => c.appid === appid);
+    if (!card) throw new Error('Aucune carte de ce jeu dans ton inventaire : lance d\'abord le scan « Cartes & sets ».');
+    const r = await trader.gemValue(appid, card.assetid);
+    engine.setGemValue(appid, r.gemValue); res.json({ gemValue: r.gemValue });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+app.post('/api/gems/craft', async (req, res) => {
+  try {
+    const appid = Number(req.body.appid), cat = S.catalog.map[appid];
+    if (isDemo()) { if (cat) S.catalog.gems.total -= cat.price; return res.json({ ok: true, totalGems: S.catalog.gems.total, demo: true }); }
+    if (!cat) throw new Error('Prix inconnu : charge d\'abord le catalogue de boosters.');
+    if (cat.unavailable) throw new Error('Ce booster n\'est pas disponible pour le moment (délai après une fabrication).');
+    if (S.catalog.gems.total && S.catalog.gems.total < cat.price) throw new Error(`Pas assez de gemmes : il en faut ${cat.price}, tu en as ${S.catalog.gems.total}.`);
+    const r = await trader.createBooster(appid);
+    S.catalog.gems = { total: r.totalGems, tradable: r.tradableGems, untradable: r.untradableGems };
+    S.invT = 0; engine.saveState(); // l'inventaire a changé : le prochain scan le relira
+    res.json({ ok: true, totalGems: r.totalGems, item: r.resultItem || null });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 

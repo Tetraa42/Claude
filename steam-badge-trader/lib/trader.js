@@ -82,4 +82,9 @@ function openBooster(appid, assetid) {
     state.community.openBoosterPack(appid, String(assetid), (err, items) => (err ? reject(err) : resolve(items.map((i) => ({ name: i.name, img: i.image, foil: !!i.foil })))));
   });
 }
-module.exports = { state, login, submitGuard, waitAfterGuard, sendOffer, openBooster };
+// ---- gemmes : catalogue des boosters (prix en gemmes), valeur d'une carte, fabrication d'un booster ----
+const needReady = () => { if (!state.ready) throw new Error('Pas connecté à Steam'); };
+const boosterCatalog = () => new Promise((res, rej) => { try { needReady(); } catch (e) { return rej(e); } state.community.getBoosterPackCatalog((e, r) => (e ? rej(e) : res(r))); });
+const gemValue = (appid, assetid) => new Promise((res, rej) => { try { needReady(); } catch (e) { return rej(e); } state.community.getGemValue(appid, String(assetid), (e, r) => (e ? rej(e) : res(r))); });
+const createBooster = (appid) => new Promise((res, rej) => { try { needReady(); } catch (e) { return rej(e); } state.community.createBoosterPack(Number(appid), false, (e, r) => (e ? rej(e) : res(r))); });
+module.exports = { boosterCatalog, gemValue, createBooster, state, login, submitGuard, waitAfterGuard, sendOffer, openBooster };

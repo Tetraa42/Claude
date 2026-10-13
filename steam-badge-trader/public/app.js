@@ -31,8 +31,8 @@ const FILTERS = [
 
 const safe = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message, true); } };
 function toast(t, bad) { const e = $('#toast'); e.textContent = t; e.className = 'show' + (bad ? ' bad' : ''); setTimeout(() => (e.className = ''), 4500); }
-async function api(u, o) {
-  const r = await fetch(u, o !== undefined ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o) } : undefined);
+async function api(u, o, signal) {
+  const r = await fetch(u, o !== undefined ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(o), signal } : { signal });
   const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j;
 }
 const hue = (t) => [...String(t)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
@@ -62,6 +62,7 @@ function taskInfo(k) {
   const t = st.tasks[k], g = st.progress;
   if (t.state === 'running') return `${t.label || 'En cours'}${k === 'cards' && g.wait ? ` · attente Steam ${g.wait} s` : ''}${t.eta ? ' · ' + fmtEta(t.eta) + ' restantes' : ''}`;
   if (t.state === 'error') return '⚠ ' + t.error;
+  if (t.stopped) return '■ Arrêté — clique pour relancer';
   if (!t.doneAt) return 'Pas encore scanné — clique pour lancer';
   const n = { badges: `${st.completed.length} badge(s) terminé(s)${st.dropsTotal ? ` · 🎴 ${st.dropsTotal} à récupérer` : ''}`, cards: `${st.sets.length} jeu(x)`, boosters: `${st.boosters.reduce((a, b) => a + b.count, 0)} booster(s)`,
     gems: `${nf(st.gems.gems + st.gems.sacks * 1000)} gemme(s)`, bot: `${nf(st.bot.games)} jeux en stock`, friends: `${st.friends.count} ami(s)`, balance: `${st.credits.balance ?? '?'} crédit(s)` }[k];
@@ -70,28 +71,33 @@ function taskInfo(k) {
 function renderScans() {
   const box = $('#scans');
   if (!box.children.length) {
-    box.innerHTML = SCANS.map(([k, ic, name, tip]) => `<button class="scan" data-scan="${k}" title="${esc(tip)}"><span class="fill"></span><span class="t"><b>${ic} ${name}</b><small></small></span><span class="pc"></span></button>`).join('');
+    box.innerHTML = SCANS.map(([k, ic, name, tip]) => `<div class="scan" role="button" tabindex="0" data-scan="${k}" title="${esc(tip)}"><span class="fill"></span><span class="t"><b>${ic} ${name}</b><small></small></span><span class="pc"></span><button class="stop" data-stop="${k}" title="Arrêter ce scan" aria-label="Arrêter">■</button></div>`).join('');
   }
   for (const [k] of SCANS) {
     const b = box.querySelector(`[data-scan="${k}"]`), t = st.tasks[k];
     b.className = 'scan ' + t.state; b.style.setProperty('--p', t.pct + '%');
     b.querySelector('small').textContent = taskInfo(k); b.querySelector('small').title = taskInfo(k);
     b.querySelector('.pc').textContent = t.state === 'running' ? t.pct + '%' : t.state === 'done' ? '↻' : t.state === 'error' ? '⟳' : '▶';
-    b.disabled = t.state === 'running';
+    b.dataset.state = t.state;
   }
 }
 $('#scans').addEventListener('click', safe(async (e) => {
+  const stop = e.target.closest('[data-stop]');
+  if (stop) { await api(`/api/scan/${stop.dataset.stop}/cancel`, {}); toast('Scan arrêté'); return poll(); }
   const b = e.target.closest('[data-scan]'); if (!b) return;
   const k = b.dataset.scan;
+  if (b.dataset.state === 'running') return; // déjà en cours : le bouton ■ permet de l'arrêter
   if (k === 'balance' && !st.demo && !st.credits.sce.connected && st.credits.balance == null) return openSettings();
   await api('/api/scan/' + k, {}); poll();
 }));
 // bouton à remplissage pour une action sans progression connue (ex. lire une page du site) : le remplissage suit le temps estimé
-async function fillProgress(btn, estSec, promise) {
-  btn.classList.add('running'); btn.disabled = true;
+async function fillProgress(btn, estSec, promiseOrFn) {
+  btn.classList.add('running');
+  const ac = new AbortController(); btn._ac = ac; // un second clic sur le bouton arrête l'attente
+  const promise = typeof promiseOrFn === 'function' ? promiseOrFn(ac.signal) : promiseOrFn;
   const t0 = Date.now(), small = btn.querySelector('small'), keep = small.textContent;
-  const iv = setInterval(() => { const el = (Date.now() - t0) / 1000, p = Math.min(95, Math.round((100 * el) / estSec)); btn.style.setProperty('--p', p + '%'); btn.querySelector('.pc').textContent = p + '%'; small.textContent = `~${Math.max(1, Math.round(estSec - el))} s restantes`; }, 250);
-  try { return await promise; } finally { clearInterval(iv); btn.style.setProperty('--p', '100%'); btn.querySelector('.pc').textContent = '100%'; small.textContent = keep; }
+  const iv = setInterval(() => { const el = (Date.now() - t0) / 1000, p = Math.min(95, Math.round((100 * el) / estSec)); btn.style.setProperty('--p', p + '%'); btn.querySelector('.pc').textContent = p + '%'; small.textContent = `~${Math.max(1, Math.round(estSec - el))} s restantes · clique pour arrêter`; }, 250);
+  try { return await promise; } finally { clearInterval(iv); btn._ac = null; btn.classList.remove('running'); btn.style.setProperty('--p', '0%'); btn.querySelector('.pc').textContent = '▶'; small.textContent = keep; }
 }
 
 // ---------- panier ----------
@@ -210,14 +216,19 @@ function renderDetail() {
     <div class="stat"><b>${s.worth != null ? s.worth : '–'}</b><small>crédits par carte (ce que le bot te donne)</small></div>
     <div class="stat"><b>${s.creditsOwned != null ? s.creditsOwned : '–'}</b><small>crédits pour tes ${s.cards.reduce((t, c) => t + c.owned, 0)} carte(s) de ce jeu</small></div>
     <div class="stat"><b>${s.botStock || 0}</b><small>carte(s) en stock chez le bot</small></div>
+    ${s.botBuy != null ? `<div class="stat"><b>${s.botBuy} cr</b><small>pour acheter tes manquantes au bot${st.credits && st.credits.balance != null ? ` (solde ${st.credits.balance})` : ''}</small></div>` : ''}
+    ${s.dupesValue ? `<div class="stat"><b>${s.dupesValue} cr</b><small>valeur de tes doublons (revente au bot)</small></div>` : ''}
+    ${s.badgePrice != null ? `<div class="stat"><b>${s.badgePrice} cr</b><small>prix du badge sur SteamCardExchange</small></div>` : ''}
     ${s.drops != null ? `<div class="stat"><b>${s.drops}</b><small>carte(s) encore à récupérer en jouant</small></div>` : ''}
   </div>
+  <div class="xsec"><h4>💎 Gemmes</h4><div class="bbox"><div class="grow">${s.gemValue != null ? `<b>1 carte = ${s.gemValue} 💎</b> si tu la transformes en gemmes` : '<span class="mut">Valeur d\'une carte en gemmes inconnue.</span>'}<br>${s.boosterGems != null ? `<b>Booster = ${nf(s.boosterGems)} 💎</b>${s.boosterUnavail ? ` <span class="mut">(indisponible${s.boosterAt ? ' jusqu\'au ' + new Date(s.boosterAt).toLocaleString('fr-FR') : ''})</span>` : ''}` : '<small class="mut">Prix du booster inconnu — charge-le dans l\'onglet Boosters.</small>'}</div>
+    <button class="ghost sm" data-act="gval">💎 Valeur d'une carte</button>${s.boosterGems != null && !s.boosterUnavail ? ` <button class="cta" style="width:auto;padding:10px 18px" data-act="craft">🛠 Fabriquer un booster</button>` : ''}</div></div>
   ${d.boosters ? `<div class="xsec"><h4>📦 Boosters</h4><div class="bbox"><img src="${esc(d.boosters.img)}" alt=""><div class="grow"><b>${d.boosters.count} booster(s)</b> pour ce jeu<br><small class="mut">3 cartes au hasard — l'ouverture est définitive.</small></div><button class="cta" style="width:auto;padding:10px 18px" data-act="boost">📦 Ouvrir un booster</button></div></div>` : ''}
   <div class="xsec"><h4>Cartes <small class="mut">— coche celles à échanger (panier)</small></h4>
-  <table class="cards"><tr><th></th><th>Carte</th><th>Possédée</th><th>Prix</th><th>Crédits</th><th>Chez le bot</th><th>Amis</th></tr>${s.cards.map((c) => `
+  <table class="cards"><tr><th></th><th>Carte</th><th>Possédée</th><th>Prix</th><th>Crédits</th><th>Chez le bot (achat / revente)</th><th>Amis</th></tr>${s.cards.map((c) => `
     <tr class="${c.owned ? '' : 'miss'} ${basket.has(c.hash) ? 'sel' : ''}"><td>${c.owned ? '' : `<input type="checkbox" data-h="${esc(c.hash)}" ${basket.has(c.hash) ? 'checked' : ''}>`}</td>
     <td><img src="${esc(c.img)}" alt="" loading="lazy"><a class="lnk" href="https://steamcommunity.com/market/listings/753/${encodeURIComponent(c.hash)}" target="_blank" rel="noopener">${esc(c.name)}</a></td>
-    <td>${c.owned ? '× ' + c.owned : '<span class="mut">manquante</span>'}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.credits != null ? c.credits : '–'}</td><td>${c.owned ? '' : c.botCard ? (c.botCard.stock > 0 ? `✔ ${c.botCard.stock}${c.botCard.price != null ? ' · ' + c.botCard.price + ' cr' : ''}` : '✖ rupture') : s.botChecked ? '–' : '<span class="mut" title="Pas encore vérifié">?</span>'}</td>
+    <td>${c.owned ? '× ' + c.owned : '<span class="mut">manquante</span>'}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.credits != null ? c.credits : '–'}</td><td>${c.owned ? '' : c.botCard ? (c.botCard.stock > 0 ? `✔ ${c.botCard.stock} en stock${c.botCard.price != null ? ' · achat ' + c.botCard.price + ' cr' : ''}${c.botCard.worth != null ? ' · revente ' + c.botCard.worth + ' cr' : ''}` : '✖ rupture' + (c.botCard.worth != null ? ' · revente ' + c.botCard.worth + ' cr' : '')) : s.botChecked ? '–' : '<span class="mut" title="Pas encore vérifié">?</span>'}</td>
     <td>${c.owned ? '' : (() => { const f = s.friends.filter((x) => x.have.includes(c.hash)); return f.length ? '👥 ' + f.length : '–'; })()}</td></tr>`).join('')}</table></div>
   <div class="xsec"><h4>🔎 Vérifier ce jeu</h4>
     <div class="checks">
@@ -241,10 +252,13 @@ $('#xbody').addEventListener('click', async (e) => {
   if (act === 'selnone') toggleCards(missing.map((c) => c.hash), false);
   if (act === 'selfriend') { const f = s.friends.find((x) => x.steamid === b.dataset.f); toggleCards(f.have, true); T.friendId = f.steamid; T.pref = 'friend'; }
   if (act === 'trade') { $('#xdlg').close(); openTrade(); }
+  if (act === 'gval') { try { b.disabled = true; await api('/api/gems/value', { appid: s.appid }); detail = await api('/api/game/' + s.appid); renderDetail(); poll(); } catch (err) { toast(err.message, true); b.disabled = false; } }
+  if (act === 'craft') craftBooster(s.appid, s.name, s.boosterGems, b);
   if (act === 'boost') openBooster(s.appid, detail.boosters.assetid, s.name, b);
   if (act === 'chkbot' || act === 'chkall') {
-    try { const d = await fillProgress(b, act === 'chkall' ? 16 : 9, api(`/api/game/${s.appid}/check`, act === 'chkbot' ? { only: 'bot' } : {})); detail = d; renderDetail(); poll(); }
-    catch (err) { toast(err.message, true); b.disabled = false; b.classList.remove('running'); }
+    if (b._ac) { b._ac.abort(); return; } // déjà en cours : on arrête
+    try { const d = await fillProgress(b, act === 'chkall' ? 16 : 9, (sig) => api(`/api/game/${s.appid}/check`, act === 'chkbot' ? { only: 'bot' } : {}, sig)); detail = d; renderDetail(); poll(); }
+    catch (err) { if (err.name === 'AbortError') toast('Vérification arrêtée'); else toast(err.message, true); }
   }
 });
 
@@ -339,6 +353,35 @@ async function openBooster(appid, assetid, game, btn) {
     $('#bdlg').showModal(); poll();
   } catch (err) { toast(err.message, true); if (btn) btn.disabled = false; }
 }
+async function craftBooster(appid, name, price, btn) {
+  if (!confirm(`Fabriquer un booster « ${name} » pour ${nf(price)} gemmes ?`)) return;
+  if (btn) btn.disabled = true;
+  try {
+    if (!(await ensureLogin())) { if (btn) btn.disabled = false; return; }
+    const r = await api('/api/gems/craft', { appid });
+    toast(`Booster fabriqué ! Il te reste ${nf(r.totalGems)} gemmes.`);
+    drawCatalog(); poll();
+  } catch (err) { toast(err.message, true); }
+  if (btn) btn.disabled = false;
+}
+let catQ = '';
+async function drawCatalog() {
+  const r = await api('/api/gems/list'); const box = $('#catbox');
+  if (!r.list.length) { box.innerHTML = ''; return; }
+  const q = catQ.toLowerCase(), own = new Set((st.sets || []).map((x) => x.appid));
+  const rows = r.list.filter((x) => !q || (x.name || '').toLowerCase().includes(q)).sort((a, b) => (own.has(b.appid) - own.has(a.appid)) || a.price - b.price).slice(0, 60);
+  box.innerHTML = `<p class="mut small">💎 ${nf(r.gems.total)} gemmes disponibles · ${r.list.length} boosters · mis à jour ${new Date(r.t).toLocaleTimeString('fr-FR')}</p>
+   <div class="search" style="margin:8px 0"><input id="catq" placeholder="Filtrer les boosters…" value="${esc(catQ)}"></div>
+   <div class="flist">${rows.map((x) => `<div class="frow"><div class="grow"><b>${esc(x.name || 'Jeu ' + x.appid)}</b>${own.has(x.appid) ? ' <small class="mut">· dans tes sets</small>' : ''}<br><small>${nf(x.price)} 💎${x.unavailable ? ' · indisponible' + (x.availableAtTime ? ' jusqu\'au ' + new Date(x.availableAtTime).toLocaleString('fr-FR') : '') : ''}</small></div><button class="ghost sm" data-craft="${x.appid}" ${x.unavailable || (r.gems.total && r.gems.total < x.price) ? 'disabled' : ''}>🛠 Fabriquer</button></div>`).join('')}</div>`;
+  const qi = $('#catq'); qi.oninput = () => { catQ = qi.value; const pos = qi.selectionStart; drawCatalog().then(() => { const n = $('#catq'); n.focus(); n.setSelectionRange(pos, pos); }); };
+  box.querySelectorAll('[data-craft]').forEach((b) => { b.onclick = () => { const x = r.list.find((y) => y.appid === +b.dataset.craft); craftBooster(x.appid, x.name || 'Jeu ' + x.appid, x.price, b); }; });
+}
+$('#catbtn').onclick = safe(async () => {
+  const b = $('#catbtn'); if (b._ac) { b._ac.abort(); return; }
+  if (!(await ensureLogin())) return;
+  try { await fillProgress(b, 8, (sig) => api('/api/gems/catalog', {}, sig)); await drawCatalog(); }
+  catch (err) { if (err.name === 'AbortError') toast('Chargement arrêté'); else toast(err.message, true); }
+});
 let bSig = '', rSig = '';
 function drawBoosters() {
   $('#gemsbar').innerHTML = st.tasks.gems.doneAt || st.gems.gems || st.gems.sacks ? `<div class="gem"><b>💎 ${nf(st.gems.gems)}</b><small>gemmes en vrac</small></div><div class="gem"><b>🎒 ${nf(st.gems.sacks)}</b><small>sac(s) de 1 000 gemmes</small></div><div class="gem"><b>∑ ${nf(st.gems.gems + st.gems.sacks * 1000)}</b><small>gemmes au total</small></div>` : '<p class="mut">Clique sur le bouton « 💎 Gemmes » en haut pour scanner tes gemmes.</p>';
@@ -382,7 +425,8 @@ $('#rmetric').onchange = () => { prefs.rankMetric = $('#rmetric').value; savePre
 
 // ---------- barre d'outils ----------
 $('#chips').onclick = (e) => { const b = e.target.closest('.chip'); if (b) { filter = prefs.filter = b.dataset.f; savePrefs(); lastSig = ''; render(); } };
-$('#q').oninput = () => st && draw(); $('#sort').onchange = () => { prefs.sort = $('#sort').value; savePrefs(); st && draw(); };
+$('#q').oninput = () => { $('#qx').hidden = !$('#q').value; st && draw(); };
+$('#qx').onclick = () => { $('#q').value = ''; $('#qx').hidden = true; $('#q').focus(); lastSig = ''; st && draw(); }; $('#sort').onchange = () => { prefs.sort = $('#sort').value; savePrefs(); st && draw(); };
 $('#refresh').onclick = safe(async () => { const r = await api('/api/refresh', {}); if (r.already) toast('Une analyse est déjà en cours : elle continue.'); lastSig = ''; poll(); });
 
 // ---------- réglages ----------
