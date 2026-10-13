@@ -80,7 +80,7 @@ app.post('/api/scan/:task', (req, res) => {
   const fn = { badges: () => engine.scanBadges(c), cards: () => engine.scanCards(c), boosters: () => engine.scanBoosters(c), gems: () => engine.scanGems(c),
     bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance(), verify: () => engine.scanVerify() }[k];
   if (!fn) return res.status(400).json({ error: 'Scan inconnu' });
-  if (isDemo() && k !== 'verify') engine.demoScan(k); else Promise.resolve(fn()).catch((e) => { S.error = e.message; });
+  if (isDemo() && !['verify', 'friends'].includes(k)) engine.demoScan(k); else Promise.resolve(fn()).catch((e) => { S.error = e.message; });
   res.json({ ok: true });
 });
 app.post('/api/wish/add', (req, res) => { try { engine.wishAdd(String(req.body.hash)); engine.checkWishes().catch(() => {}); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });

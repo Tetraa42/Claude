@@ -493,7 +493,7 @@ function enrichSet(s, cpc = 0) {
   return { ...s,
     botBuy: checked ? +inStock.reduce((t, c) => t + (c.botCard.price || 0), 0).toFixed(2) : null,                       // ce que le bot te vendrait tes cartes manquantes (crédits)
     dupesValue: worth != null ? +cards.reduce((t, c) => t + Math.max(0, c.owned - 1) * ((c.botCard && c.botCard.worth != null) ? c.botCard.worth : worth), 0).toFixed(2) : null, // ce que le bot te donne pour tes doublons
-    badgePrice: bp ? bp.price : null,                                                                                      // prix du badge complet affiché sur SteamCardExchange
+    botUrl: sce.gameUrl(s.appid), badgePrice: bp ? bp.price : null,                                                                                      // prix du badge complet affiché sur SteamCardExchange
     gemValue: S.gemVal[s.appid] != null ? S.gemVal[s.appid] : null, boosterGems: cat ? cat.price : null, boosterUnavail: cat ? cat.unavailable : false, boosterAt: cat ? cat.availableAtTime : null, drops: S.drops.has(s.appid) ? S.drops.get(s.appid) : null, cards, friends, worth, creditsOwned: worth != null ? +(worth * ownedCount).toFixed(2) : null,
     botStock: bi ? bi.stock : 0, botDistinct: bi ? Math.min(bi.distinct, s.total) : 0, botSets: bi ? bi.setsAvail : 0,
     botChecked: checked, botHas: checked ? cards.filter((c) => !c.owned && c.botCard && c.botCard.stock > 0).length : bi ? Math.min(bi.distinct, missing.length) : 0,

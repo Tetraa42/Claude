@@ -23,6 +23,7 @@ const FILTERS = [
   ['dupes', '♻ Avec doublons', (s) => s.dupes > 0],
   ['cheap', '💶 < 0,50 €', (s) => s.cost != null && s.cost > 0 && s.cost < 0.5],
   ['bot', '🤖 En stock chez le bot', (s) => s.botStock > 0],
+  ['friends', '👥 Chez des amis', (s) => s.friends.length > 0],
   ['botfull', '🤖 Set complet dispo', (s) => s.botSets > 0],
   ['drops', '🎴 À récupérer en jouant', (s) => s.drops > 0],
   ['done', '🏆 Badges terminés', null],
@@ -52,7 +53,7 @@ const SCANS = [
   ['boosters', '📦', 'Boosters', 'Scanner mes boosters'],
   ['gems', '💎', 'Gemmes', 'Scanner mes gemmes'],
   ['bot', '🤖', 'Bot (SCE)', 'Lire l\'inventaire du bot SteamCardExchange'],
-  ['friends', '👥', 'Amis (souhaits)', 'Lire les inventaires de mes amis pour ma liste de souhaits'],
+  ['friends', '👥', 'Amis', 'Lire les inventaires de mes amis (cartes qu\'ils ont pour toi)'],
   ['verify', '✅', 'Vérifier les jeux', 'Vérifier chez le bot les jeux qu\'il peut compléter'],
   ['balance', '💳', 'Solde de crédits', 'Lire mon solde sur SteamCardExchange'],
 ];
@@ -147,7 +148,7 @@ async function fillProgress(btn, estSec, promiseOrFn) {
 // ---------- panier ----------
 function cardIndex() { // cartes manquantes de tous les jeux, par hash
   const m = new Map();
-  for (const s of st.sets) for (const c of s.cards) if (!c.owned && !c.unknown) m.set(c.hash, { ...c, appid: s.appid, game: s.name, friends: [] });
+  for (const s of st.sets) for (const c of s.cards) if (!c.owned && !c.unknown) m.set(c.hash, { ...c, appid: s.appid, game: s.name, friends: s.friends.filter((f) => f.have.includes(c.hash)) });
   return m;
 }
 function renderBasket() {
@@ -202,10 +203,17 @@ $('#views').onclick = (e) => {
   if (e.target.closest('#upd')) { const u = st.update; if (u.status === 'ready') api('/api/update/install', {}); else openSettings(); }
 };
 
+// ---------- couleur des cartes manquantes : bot (turquoise), ami (violet), les deux (dégradé) ----------
+const botHas = (c) => !!(c.botCard && c.botCard.stock > 0);
+function missClass(s, c) {
+  const fr = s.friends.some((f) => f.have.includes(c.hash)), bot = botHas(c);
+  return bot && fr ? 'both' : bot ? 'cbot' : fr ? 'cfr' : '';
+}
+const tradeUrl = (steamid) => `https://steamcommunity.com/tradeoffer/new/?partner=${(BigInt(steamid) - 76561197960265728n).toString()}`; // page d'échange Steam avec cet ami
 // ---------- sets ----------
 function draw() {
   const q = $('#q').value.toLowerCase(), sort = $('#sort').value;
-  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botStock, s.cost, s.worth, s.provisional, s.botChecked, s.botHas]), st.completed.length, st.progress.running]);
+  const sig = JSON.stringify([filter, q, sort, st.currency, st.credits.balance, st.sets.map((s) => [s.appid, s.ownedUnique, s.botStock, s.friends.length, s.cost, s.worth, s.provisional, s.botChecked, s.botHas]), st.completed.length, st.progress.running]);
   if (sig === lastSig) return; lastSig = sig;
   if (filter === 'done') {
     $('#h2').innerHTML = 'Badges terminés <small>niveau 5 — 100 % · clique pour voir le détail</small>';
@@ -223,7 +231,8 @@ function draw() {
   $('#grid').innerHTML = list.map((s) => `
   <article class="set"><img class="banner" data-n="${esc(s.name)}" data-detail="${s.appid}" src="${esc(s.banner)}" alt="" loading="lazy" onerror="fb(this)">
    <div class="body"><header><h3 data-detail="${s.appid}">${esc(s.name)}</h3><span class="pill">${s.badgeLevel ? 'Niv. ' + s.badgeLevel + ' → ' + (s.badgeLevel + 1) : 'Nouveau badge'}</span></header>
-    <div class="fan">${s.cards.map((c) => c.unknown ? '<span class="ph" title="Carte pas encore connue"></span>' : `<img loading="lazy" src="${esc(c.img)}" title="${esc(c.name)} — ${esc(c.priceText || '')}${c.credits != null ? ' · ' + c.credits + ' crédit(s) chez le bot' : ''}" class="${c.owned ? '' : 'miss'}" alt="${esc(c.name)}">`).join('')}</div>
+    <div class="fan">${s.cards.map((c) => c.unknown ? '<span class="ph" title="Carte pas encore connue"></span>' : `<img loading="lazy" src="${esc(c.img)}" title="${esc(c.name)} — ${esc(c.priceText || '')}${c.credits != null ? ' · ' + c.credits + ' crédit(s) chez le bot' : ''}" class="${c.owned ? '' : 'miss ' + missClass(s, c)}" alt="${esc(c.name)}">`).join('')}</div>
+    ${s.missingCount ? `<div class="legend"><span class="lg bot">🤖 chez le bot</span><span class="lg fr">👥 chez un ami</span><span class="lg none">manquante</span></div>` : ''}
     <div class="meter"><i style="width:${(100 * s.ownedUnique) / s.total}%"></i></div>
     <div class="row"><span>${s.ownedUnique}/${s.total} cartes · ${s.dupes} doublon(s)</span><span>+100 XP</span></div>
     <div class="tags">${s.botChecked ? `<span class="tag bot" title="Vérifié carte par carte sur la page du jeu chez le bot">🤖 a ${s.botHas}/${s.missingCount} de tes cartes manquantes</span>` : s.botStock ? `<span class="tag bot" title="Cartes en stock chez le bot SteamCardExchange (pas encore vérifié carte par carte)">🤖 stock ${s.botStock} · ${s.botDistinct}/${s.total} différentes${s.botSets ? ' · ' + s.botSets + ' set(s) complet(s)' : ''}</span>` : ''}${s.friends.length ? `<span class="tag fr">👥 ${s.friends.length} ami(s)</span>` : ''}${s.drops ? `<span class="tag dr" title="Cartes qu'il te reste à obtenir en jouant à ce jeu">🎴 ${s.drops} à récupérer en jouant</span>` : ''}${s.worth != null ? `<span class="tag cr" title="Crédits que le bot te donne pour une carte de ce jeu">💳 ${s.worth} crédit(s)/carte</span>` : ''}</div>
@@ -267,12 +276,13 @@ function renderDetail() {
   </div>
   <div class="xsec"><h4>💎 Gemmes</h4><div class="bbox"><div class="grow">${s.gemValue != null ? `<b>1 carte = ${s.gemValue} 💎</b> si tu la transformes en gemmes` : '<span class="mut">Valeur d\'une carte en gemmes inconnue.</span>'}<br>${s.boosterGems != null ? `<b>Booster = ${nf(s.boosterGems)} 💎</b>${s.boosterUnavail ? ` <span class="mut">(indisponible${s.boosterAt ? ' jusqu\'au ' + new Date(s.boosterAt).toLocaleString('fr-FR') : ''})</span>` : ''}` : '<small class="mut">Prix du booster inconnu — charge-le dans l\'onglet Boosters.</small>'}</div>
     <button class="ghost sm" data-act="gval">💎 Valeur d'une carte</button>${s.boosterGems != null && !s.boosterUnavail ? ` <button class="cta" style="width:auto;padding:10px 18px" data-act="craft">🛠 Fabriquer un booster</button>` : ''}</div></div>
-  ${d.boosters ? `<div class="xsec"><h4>📦 Boosters</h4><div class="bbox"><img src="${esc(d.boosters.img)}" alt=""><div class="grow"><b>${d.boosters.count} booster(s)</b> pour ce jeu<br><small class="mut">3 cartes au hasard — l'ouverture est définitive.</small></div><button class="cta" style="width:auto;padding:10px 18px" data-act="boost">📦 Ouvrir un booster</button></div></div>` : ''}
+  ${d.boosters ? `<div class="xsec"><h4>📦 Boosters</h4><div class="bbox"><img src="${esc(d.boosters.img)}" alt=""><div class="grow"><b>${d.boosters.count} booster(s)</b> pour ce jeu<br><small class="mut">ouvre l'inventaire Steam avec ce booster déjà sélectionné.</small></div><button class="cta" style="width:auto;padding:10px 18px" data-act="boost">📦 Ouvrir sur Steam ↗</button></div></div>` : ''}
   <div class="xsec"><h4>Cartes <small class="mut">— coche celles à échanger (panier)</small></h4>
-  <table class="cards"><tr><th></th><th>Carte</th><th>Possédée</th><th>Prix</th><th>Crédits</th><th>Chez le bot (achat / revente)</th><th></th></tr>${s.cards.map((c) => `
+  <table class="cards"><tr><th></th><th>Carte</th><th>Possédée</th><th>Prix</th><th>Crédits</th><th>Chez le bot (achat / revente)</th><th>Chez des amis</th><th></th></tr>${s.cards.map((c) => `
     <tr class="${c.owned ? '' : 'miss'} ${basket.has(c.hash) ? 'sel' : ''}"><td>${c.owned ? '' : `<input type="checkbox" data-h="${esc(c.hash)}" ${basket.has(c.hash) ? 'checked' : ''}>`}</td>
     <td><img src="${esc(c.img)}" alt="" loading="lazy"><a class="lnk" href="https://steamcommunity.com/market/listings/753/${encodeURIComponent(c.hash)}" target="_blank" rel="noopener">${esc(c.name)}</a></td>
-    <td>${c.owned ? '× ' + c.owned : '<span class="mut">manquante</span>'}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.credits != null ? c.credits : '–'}</td><td>${c.owned ? '' : c.botCard ? (c.botCard.stock > 0 ? `✔ ${c.botCard.stock} en stock${c.botCard.price != null ? ' · achat ' + c.botCard.price + ' cr' : ''}${c.botCard.worth != null ? ' · revente ' + c.botCard.worth + ' cr' : ''}` : '✖ rupture' + (c.botCard.worth != null ? ' · revente ' + c.botCard.worth + ' cr' : '')) : s.botChecked ? '–' : '<span class="mut" title="Pas encore vérifié">?</span>'}</td>
+    <td>${c.owned ? '× ' + c.owned : '<span class="mut">manquante</span>'}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.credits != null ? c.credits : '–'}</td><td>${c.owned ? '' : c.botCard ? (c.botCard.stock > 0 ? `<a class="chip cbot" href="${esc(s.botUrl)}" target="_blank" rel="noopener" title="Ouvrir la page d'échange du bot pour ce jeu">🤖 ✔ ${c.botCard.stock} en stock${c.botCard.price != null ? ' · achat ' + c.botCard.price + ' cr' : ''}${c.botCard.worth != null ? ' · revente ' + c.botCard.worth + ' cr' : ''}</a>` : '✖ rupture' + (c.botCard.worth != null ? ' · revente ' + c.botCard.worth + ' cr' : '')) : s.botChecked ? '–' : '<span class="mut" title="Pas encore vérifié">?</span>'}</td>
+    <td>${c.owned ? '' : (() => { const f = s.friends.filter((x) => x.have.includes(c.hash)); return f.length ? f.map((x) => `<button class="chip cfr" data-tfriend="${x.steamid}" data-h="${esc(c.hash)}" title="Échanger cette carte avec ${esc(x.name)}">👥 ${esc(x.name)}</button>`).join('') : '–'; })()}</td>
     <td>${c.owned || c.unknown ? '' : `<button class="star ${(st.wishlist || []).some((w) => w.hash === c.hash) ? 'on' : ''}" data-wish="${esc(c.hash)}" title="Liste de souhaits : m'avertir quand le bot a cette carte">${(st.wishlist || []).some((w) => w.hash === c.hash) ? '★' : '☆'}</button>`}</td></tr>`).join('')}</table></div>
   <div class="xsec"><h4>🔎 Vérifier ce jeu</h4>
     <div class="checks">
@@ -282,6 +292,7 @@ function renderDetail() {
   <div class="xsec"><h4>⇄ Échanges possibles</h4>
     <div class="flist">
      <div class="frow"><span>🤖</span><div class="grow"><b>${esc(d.bot.name)}</b><br><small>${s.botChecked ? (s.botHas ? `a ${s.botHas}/${missing.length} de tes cartes manquantes : ${s.cards.filter((c) => !c.owned && c.botCard && c.botCard.stock > 0).map((c) => esc(c.name)).join(', ')}` : 'n\'a aucune de tes cartes manquantes (vérifié carte par carte)') : d.bot.status !== 'ready' ? 'inventaire du bot non chargé : clique sur le bouton « Bot SteamCardExchange » en haut' : s.botStock ? `stock : ${s.botStock} carte(s) · ${s.botDistinct}/${s.total} différentes${s.botSets ? ` · ${s.botSets} set(s) complet(s) disponible(s)` : ''} · il te donne ${s.worth} crédit(s) par carte` : 'n\'a aucune carte de ce jeu en stock'}</small></div><a class="ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">Ouvrir sur le site ↗</a></div>
+     ${s.friends.map((f) => `<div class="frow"><img src="${esc(f.avatar || '')}" alt=""><div class="grow"><b>${esc(f.name)}</b><br><small>a ${f.have.length}/${missing.length} : ${f.have.map((h) => esc((s.cards.find((c) => c.hash === h) || {}).name)).join(', ')}</small></div><button class="ghost sm" data-act="selfriend" data-f="${f.steamid}">⇄ Échanger</button></div>`).join('') || (st.friends.status === 'ready' ? '<p class="mut small">Aucun ami n\'a tes cartes manquantes.</p>' : '<p class="mut small">Clique sur « 👥 Amis » en haut pour voir qui a tes cartes.</p>')}
     </div>
     <div class="row" style="margin-top:10px"><span><button class="ghost sm" data-act="selall">Tout sélectionner (manquantes)</button> <button class="ghost sm" data-act="selnone">Désélectionner</button></span></div></div>
   <div class="row xfoot"><span id="xcount"></span><button class="go" style="width:auto;padding:12px 24px;margin:0" data-act="trade">⇄ Lancer l'échange</button></div>`;
@@ -289,16 +300,19 @@ function renderDetail() {
 }
 $('#xbody').addEventListener('change', (e) => { const h = e.target.dataset && e.target.dataset.h; if (h === undefined) return; toggleCards([h], e.target.checked, false); e.target.closest('tr').classList.toggle('sel', e.target.checked); });
 $('#xbody').addEventListener('click', async (e) => {
+  const tf = e.target.closest('[data-tfriend]');
+  if (tf) { toggleCards([tf.dataset.h], true); T.friendId = tf.dataset.tfriend; $('#xdlg').close(); openTrade(); return; }
   const w = e.target.closest('[data-wish]');
   if (w) { const on = w.classList.contains('on'); try { await api(on ? '/api/wish/remove' : '/api/wish/add', { hash: w.dataset.wish }); w.classList.toggle('on', !on); w.textContent = on ? '☆' : '★'; toast(on ? 'Retirée de la liste de souhaits' : '⭐ Ajoutée : tu seras averti quand le bot l\'aura'); poll(); } catch (err) { toast(err.message, true); } return; }
   const b = e.target.closest('[data-act]'); if (!b || !detail) return;
   const s = detail.set, missing = s.cards.filter((c) => !c.owned), act = b.dataset.act;
   if (act === 'selall') toggleCards(missing.map((c) => c.hash), true);
   if (act === 'selnone') toggleCards(missing.map((c) => c.hash), false);
-    if (act === 'trade') { $('#xdlg').close(); openTrade(); }
+    if (act === 'selfriend') { const f = s.friends.find((x) => x.steamid === b.dataset.f); toggleCards(f.have, true); T.friendId = f.steamid; $('#xdlg').close(); openTrade(); return; }
+  if (act === 'trade') { $('#xdlg').close(); openTrade(); }
   if (act === 'gval') { try { b.disabled = true; await api('/api/gems/value', { appid: s.appid }); detail = await api('/api/game/' + s.appid); renderDetail(); poll(); } catch (err) { toast(err.message, true); b.disabled = false; } }
   if (act === 'craft') craftBooster(s.appid, s.name, s.boosterGems, b);
-  if (act === 'boost') openBooster(s.appid, detail.boosters.assetid, s.name, b);
+  if (act === 'boost') openBooster(s.appid, detail.boosters.assetid);
   if (act === 'chkbot' || act === 'chkall') {
     if (b._ac) { b._ac.abort(); return; } // déjà en cours : on arrête
     try { const d = await fillProgress(b, act === 'chkall' ? 16 : 9, (sig) => api(`/api/game/${s.appid}/check`, act === 'chkbot' ? { only: 'bot' } : {}, sig)); detail = d; renderDetail(); poll(); }
@@ -329,8 +343,12 @@ function openTrade() {
   if (!basket.size) return toast('Sélectionne d\'abord des cartes (clique sur un jeu pour le détail).', true);
   const idx = cardIndex(), hs = [...basket].filter((h) => idx.has(h));
   if (!hs.length) return toast('Ces cartes ne sont plus manquantes.', true);
-  T.friends = []; T.friendId = ''; T.source = 'url'; T.pref = null; T.botN = 0;
-  $('#dsub').textContent = `${hs.length} carte(s) dans le panier`;
+  const fr = new Map();
+  for (const h of hs) for (const f of idx.get(h).friends) fr.set(f.steamid, { id: f.steamid, name: f.name, n: (fr.get(f.steamid) ? fr.get(f.steamid).n : 0) + 1 });
+  T.friends = [...fr.values()].sort((a, b) => b.n - a.n);
+  if (!T.friends.find((f) => f.id === T.friendId)) T.friendId = T.friends[0] ? T.friends[0].id : '';
+  T.source = T.friends.length ? 'friend' : 'url'; T.pref = null; T.botN = 0;
+  $('#dsub').textContent = `${hs.length} carte(s) dans le panier — chez des amis : ${T.friends.length} ami(s)`;
   $('#note').textContent = ''; $('#pv').hidden = true; $('#go').disabled = true;
   $('#basket').hidden = true; setSource(T.source); $('#dlg').showModal();
 }
@@ -340,11 +358,11 @@ function setSource(s) {
   document.querySelectorAll('#tabs button').forEach((b) => b.classList.toggle('on', b.dataset.s === s));
   const box = $('#srcbox'); $('#pv').hidden = true; $('#go').disabled = true;
   if (s === 'bot') box.innerHTML = `<div class="sbox">Le bot SteamCardExchange fait ses échanges depuis <b>son site</b> : bouton « Make Offer » sur la page Inventory.<br>Le bot te donne des crédits pour tes cartes en trop${st.credits.spareValue != null ? ` (≈ <b>${st.credits.spareValue} crédits</b> pour tes cartes en trop)` : ''}, que tu dépenses ensuite pour prendre ses cartes (max 6 cartes par côté, 100 crédits stockés au maximum).<br><br><a class="ghost" href="https://www.steamcardexchange.net/index.php?inventory" target="_blank" rel="noopener">Ouvrir l'inventaire du bot ↗</a></div>`;
-  if (s === 'friend') box.innerHTML = T.friends.length ? `<label class="lab">Ami<select id="fsel">${T.friends.map((f) => `<option value="${f.id}" ${f.id === T.friendId ? 'selected' : ''}>${esc(f.name)} — ${f.n} carte(s) du panier</option>`).join('')}</select></label>`
+  if (s === 'friend') box.innerHTML = T.friends.length ? `<label class="lab">Ami<select id="fsel">${T.friends.map((f) => `<option value="${f.id}" ${f.id === T.friendId ? 'selected' : ''}>${esc(f.name)} — ${f.n} carte(s) du panier</option>`).join('')}</select></label><p class="mut small" style="margin:8px 0 0"><a id="fopen" class="ghost sm" href="#" target="_blank" rel="noopener">↗ Ouvrir la page d'échange Steam avec cet ami</a> — ou envoie l'offre directement avec le bouton ci-dessous.</p>`
     : '<p class="mut">Aucun ami n\'a les cartes du panier (clique d\'abord sur « Scanner mes amis »).</p>';
   if (s === 'url') box.innerHTML = '<label class="lab">Lien d\'échange du partenaire<input id="turl" placeholder="https://steamcommunity.com/tradeoffer/new/?partner=…&token=…"></label>';
   if (s === 'friend' && T.friends.length) { $('#fsel').onchange = () => { T.friendId = $('#fsel').value; preview(); }; T.friendId = $('#fsel').value; }
-  if (s === 'friend' && T.friends.length) preview();
+  if (s === 'friend' && T.friends.length) { const upd = () => { $('#fopen').href = tradeUrl($('#fsel').value); }; upd(); $('#fsel').addEventListener('change', upd); preview(); }
   if (st.demo && $('#turl')) $('#turl').value = 'https://steamcommunity.com/tradeoffer/new/?partner=123456&token=demo';
 }
 $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) setSource(b.dataset.s); };
@@ -381,17 +399,11 @@ $('#go').onclick = async () => {
 };
 
 // ---------- boosters ----------
-async function openBooster(appid, assetid, game, btn) {
-  if (!confirm(`Ouvrir un booster « ${game} » ? Cette action est définitive.`)) return;
-  if (btn) btn.disabled = true;
-  try {
-    if (!(await ensureLogin())) { if (btn) btn.disabled = false; return; }
-    const r = await api('/api/boosters/open', { appid, assetid });
-    $('#bt').textContent = `Booster ${game} : tu as reçu`;
-    $('#bres').innerHTML = r.cards.map((c) => `<img src="${esc(c.img)}" title="${esc(c.name)}${c.foil ? ' (foil)' : ''}" alt="${esc(c.name)}">`).join('');
-    if ($('#xdlg').open) $('#xdlg').close();
-    $('#bdlg').showModal(); poll();
-  } catch (err) { toast(err.message, true); if (btn) btn.disabled = false; }
+// Ouvre l'inventaire Steam avec le booster déjà sélectionné : il ne reste qu'à cliquer sur « Ouvrir le booster ».
+function openBooster(appid, assetid) {
+  const id = st.profile && st.profile.steamid; if (!id) return toast('Profil Steam non chargé.', true);
+  window.open(`https://steamcommunity.com/profiles/${id}/inventory/#753_6_${assetid}`, '_blank');
+  toast('Page Steam ouverte : clique sur « Ouvrir le booster » sur le booster sélectionné.');
 }
 async function craftBooster(appid, name, price, btn) {
   if (!confirm(`Fabriquer un booster « ${name} » pour ${nf(price)} gemmes ?`)) return;
@@ -429,12 +441,12 @@ function drawBoosters() {
   $('#bgrid').innerHTML = st.boosters.map((b) => `
   <article class="set"><img class="banner" data-n="${esc(b.game)}" data-detail="${b.appid}" src="${esc(b.banner)}" alt="" onerror="fb(this)"><div class="body"><header><h3 data-detail="${b.appid}">${esc(b.game)}</h3><span class="pill">× ${b.count}</span></header>
     <div class="fan"><img src="${esc(b.img)}" alt="" style="width:96px;height:96px"></div>
-    <button class="cta" data-boost="${b.appid}" data-asset="${b.assetid}">📦 Ouvrir un booster</button></div></article>`).join('') || '<p class="empty">Aucun booster dans ton inventaire.</p>';
+    <button class="cta" data-boost="${b.appid}" data-asset="${b.assetid}">📦 Ouvrir sur Steam ↗</button></div></article>`).join('') || '<p class="empty">Aucun booster dans ton inventaire.</p>';
 }
 $('#bgrid').addEventListener('click', (e) => {
   const d = e.target.closest('[data-detail]'); if (d) return openDetail(Number(d.dataset.detail));
   const b = e.target.closest('[data-boost]'); if (!b) return;
-  const bo = st.boosters.find((x) => String(x.appid) === b.dataset.boost); openBooster(bo.appid, b.dataset.asset, bo.game, b);
+  const bo = st.boosters.find((x) => String(x.appid) === b.dataset.boost); openBooster(bo.appid, b.dataset.asset);
 });
 
 // ---------- classement ----------

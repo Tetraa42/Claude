@@ -54,3 +54,5 @@ Pour ton vrai compte : copie `.env.example` en `.env`, mets ta clé API Steam (h
 - **⭐ Liste de souhaits** : étoile sur les cartes manquantes ; avertissement quand le bot (ou un ami scanné) a la carte.
 - Les cartes des amis ne sont plus utilisées pour les échanges (seulement pour la liste de souhaits).
 - Page d'un jeu chez le bot : lecture corrigée (blocs « Stock / Worth / Price »).
+- Amis de retour : cartes manquantes colorées (turquoise = chez le bot, violet = chez un ami, double contour = les deux), pastilles cliquables par carte (ami → page d'échange, bot → page du jeu chez le bot).
+- « Ouvrir un booster » ouvre l'inventaire Steam avec le booster déjà sélectionné.
