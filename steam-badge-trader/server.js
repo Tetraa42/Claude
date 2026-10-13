@@ -113,7 +113,7 @@ app.post('/api/rank/join', async (_, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.post('/api/bot/refresh', (_, res) => { engine.refreshBot(cfg()); res.json({ ok: true }); });
+app.post('/api/bot/refresh', (_, res) => { engine.refreshBot(); res.json({ ok: true }); });
 app.post('/api/friends/scan', (_, res) => { engine.scanFriends(cfg()); res.json({ ok: true }); });
 
 const parseTrade = (u) => {
@@ -132,8 +132,7 @@ app.post('/api/trade/preview', async (req, res) => {
     const wanted = engine.missingByHash();
     let theirs;
     if (source === 'bot') {
-      if (S.bot.status !== 'ready') throw new Error('Inventaire du bot pas encore chargé : ' + (S.bot.error || 'patiente quelques secondes'));
-      theirs = S.bot.map;
+      throw new Error('Le bot SteamCardExchange s\'utilise depuis son site (bouton « Make Offer »).');
     } else if (source === 'friend') {
       theirs = S.friends.inv.get(friendId);
       if (!theirs) throw new Error('Ami inconnu : lance d\'abord « Scanner mes amis »');
@@ -163,11 +162,7 @@ app.get('/api/game/:appid', async (req, res) => {
 app.get('/api/sce/status', (_, res) => res.json(sce.status()));
 app.post('/api/sce/login', async (_, res) => { try { res.json(await sce.login()); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/sce/balance', async (_, res) => { try { res.json(await sce.refreshBalance()); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.post('/api/sce/scan', (req, res) => {
-  const only = req.body && req.body.appid ? S.sets.filter((x) => x.appid === Number(req.body.appid)) : [...S.sets].sort((a, b) => a.cost - b.cost);
-  if (isDemo()) return res.json({ ok: true });
-  sce.scanGames(only); res.json({ ok: true });
-});
+app.post('/api/sce/scan', (_, res) => { engine.refreshBot(); res.json({ ok: true }); }); // relit l'inventaire du bot sur le site
 app.get('/api/sce/debug', (_, res) => res.type('text').send(sce.debug() || 'Aucun diagnostic pour le moment.'));
 
 app.get('/api/trade/status', (_, res) => res.json({ ready: trader.state.ready, needGuard: trader.state.needGuard, error: trader.state.error, demo: isDemo() }));

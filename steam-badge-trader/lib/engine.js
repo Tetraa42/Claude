@@ -9,11 +9,12 @@ const { writeJsonAtomic } = require('./fsutil');
 const { levelFromXp, totalXpForLevel } = require('./levels');
 
 const BOT_DEFAULT = 'https://steamcommunity.com/id/CardExchange';
-const PRICE_TTL = 6 * 3600e3, BOT_TTL = 3600e3, RANK_TTL = 3600e3;
+const PRICE_TTL = 6 * 3600e3, BOT_TTL = 30 * 60e3, RANK_TTL = 3600e3;
 const S = {
   running: false, refreshing: false, phase: '', done: 0, total: 0, needFetch: 0, fetched: 0, error: null, profile: null, names: new Map(), myCards: [], boosters: [],
   sets: [], completed: [], updatedAt: 0, demo: false, currency: 3, botOnly: true,
-  bot: { status: 'idle', error: null, id: null, name: 'CardExchange', avatar: null, map: new Map(), apps: null, count: 0, t: 0 },
+  bot: { status: 'idle', error: null, name: 'SteamCardExchange', apps: null, count: 0, games: 0, t: 0 },
+  retry: { at: 0, n: 0 },
   friends: { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map() },
   rank: { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0 },
 };
@@ -41,9 +42,8 @@ const levelsMap = () => new Map((S.profile ? S.profile.badges : []).map((b) => [
 function saveState() {
   if (S.demo || !S.profile) return; // rien d'utile à sauvegarder : on ne remplace surtout pas une bonne sauvegarde par un état vide
   try {
-    const botMap = {}; for (const [h, v] of S.bot.map) botMap[h] = v.map((x) => x.assetid);
     writeJsonAtomic(stateFile(), { v: 2, t: S.updatedAt, currency: S.currency, profile: S.profile, completed: S.completed, sets: S.sets, myCards: S.myCards, boosters: S.boosters,
-      bot: { id: S.bot.id, name: S.bot.name, avatar: S.bot.avatar, apps: S.bot.apps ? [...S.bot.apps] : null, count: S.bot.count, t: S.bot.t, map: botMap }, rank: S.rank.list, rankT: S.rank.t });
+      rank: S.rank.list, rankT: S.rank.t });
   } catch {}
 }
 function loadSaved() {
@@ -51,38 +51,29 @@ function loadSaved() {
     const d = JSON.parse(fs.readFileSync(stateFile(), 'utf8'));
     if (d.v !== 2) return false;
     Object.assign(S, { profile: d.profile, completed: d.completed || [], sets: d.sets || [], myCards: d.myCards || [], boosters: d.boosters || [], updatedAt: d.t || 0, currency: d.currency || 3 });
-    const b = d.bot || {};
-    Object.assign(S.bot, { id: b.id, name: b.name || 'CardExchange', avatar: b.avatar, apps: b.apps ? new Set(b.apps) : null, count: b.count || 0, t: b.t || 0,
-      map: new Map(Object.entries(b.map || {}).map(([h, ids]) => [h, ids.map((assetid) => ({ assetid }))])), status: b.apps ? 'ready' : 'idle' });
+    restoreBot(); // l'inventaire du bot est mémorisé à part (sce.json)
     S.rank.list = d.rank || []; S.rank.t = d.rankT || 0; S.rank.status = S.rank.list.length ? 'ready' : 'idle';
     return !!S.profile;
   } catch { return false; }
 }
 const isFresh = (ms = 10 * 60e3) => S.updatedAt && Date.now() - S.updatedAt < ms;
 
-// ---------- bot ----------
-async function loadBot(cfg) {
+// ---------- bot (SteamCardExchange) ----------
+// L'inventaire Steam du bot est gigantesque (des centaines de pages → Steam répond « 429 »). On lit à la place le tableau
+// « Inventory » du site : une ligne par jeu avec la valeur en crédits, le stock et le nombre de cartes différentes en stock.
+function restoreBot() {
+  const info = sce.invMap(), B = S.bot;
+  if (!info.size) return;
+  const rows = [...info.values()].filter((r) => r.stock > 0);
+  Object.assign(B, { apps: new Set(rows.map((r) => r.appid)), count: rows.reduce((t, r) => t + r.stock, 0), games: rows.length, t: sce.status().invAge, status: 'ready', error: null });
+}
+async function loadBot(force = false) {
   const B = S.bot;
   B.status = 'loading'; B.error = null;
-  try {
-    B.id = B.id || (await steam.resolveSteamId(cfg.botProfile || BOT_DEFAULT, cfg.key));
-    const [info] = await steam.getSummaries(cfg.key, [B.id]);
-    if (info) { B.name = info.personaname; B.avatar = info.avatarfull; }
-    const cards = (await steam.getInventory(B.id)).cards.filter((c) => c.tradable);
-    B.apps = new Set(cards.map((c) => c.appid)); B.count = cards.length; B.t = Date.now(); B.status = 'ready';
-    return groupBy(cards, (c) => c.hash);
-  } catch (e) { B.status = 'error'; B.error = e.code === 'PRIVATE' ? 'Inventaire du bot privé' : e.message; return null; }
+  try { await sce.readInventory(force); restoreBot(); return true; }
+  catch (e) { B.status = 'error'; B.error = e.message; return false; }
 }
-function trimBot(full) { // on ne garde que les cartes utiles pour nos sets
-  const wanted = new Set(S.sets.flatMap((s) => s.cards.map((c) => c.hash)));
-  S.bot.map = new Map();
-  for (const h of wanted) if (full.has(h)) S.bot.map.set(h, full.get(h).map((c) => ({ assetid: c.assetid })));
-}
-async function refreshBot(cfg) {
-  if (S.demo) return;
-  const full = await loadBot(cfg);
-  if (full) { trimBot(full); saveState(); }
-}
+async function refreshBot() { if (!S.demo) { await loadBot(true); saveState(); } }
 
 // ---------- analyse principale ----------
 async function run(cfg, force = false) {
@@ -90,7 +81,6 @@ async function run(cfg, force = false) {
   const id = ++runId; // une analyse plus récente annule l'ancienne (ex. changement de compte dans les Réglages)
   const stale = () => id !== runId;
   Object.assign(S, { running: true, refreshing: false, error: null, done: 0, total: 0, needFetch: 0, fetched: 0, demo: false, currency: cfg.currency, botOnly: cfg.botOnly });
-  let botFull = null;
   try {
     S.phase = 'Lecture de ton profil Steam';
     const sid = await steam.resolveSteamId(cfg.profile, cfg.key);
@@ -107,7 +97,7 @@ async function run(cfg, force = false) {
     S.myCards = inv.cards; S.boosters = inv.boosters;
     saveState();
 
-    if (cfg.botOnly && !(S.bot.apps && Date.now() - S.bot.t < BOT_TTL)) { S.phase = 'Lecture de l\'inventaire du bot'; botFull = await loadBot(cfg); if (stale()) return; }
+    if (cfg.botOnly && !(S.bot.apps && Date.now() - S.bot.t < BOT_TTL)) { S.phase = 'Lecture de l\'inventaire du bot (SteamCardExchange)'; await loadBot(); if (stale()) return; }
     const lvl = levelsMap();
     const byApp = groupBy(S.myCards, (c) => c.appid);
     let apps = [...byApp.entries()].filter(([a]) => (lvl.get(a) || 0) < 5);
@@ -134,8 +124,7 @@ async function run(cfg, force = false) {
       if (++sinceSave >= 5) { sinceSave = 0; saveState(); } // rien n'est perdu si on ferme le logiciel en cours d'analyse
     }
     S.sets = S.sets.filter((x) => seen.has(x.appid));
-    if (botFull) trimBot(botFull);
-    S.updatedAt = Date.now(); S.phase = '';
+    S.updatedAt = Date.now(); S.phase = ''; S.retry = { at: 0, n: 0 };
     saveState();
     S.running = false;
     if (cfg.onDone) { try { cfg.onDone(); } catch {} }
@@ -144,8 +133,11 @@ async function run(cfg, force = false) {
   } catch (e) {
     if (stale()) return;
     S.error = e.message; S.phase = '';
-    if (botFull) trimBot(botFull); // on garde les cartes du bot déjà lues même si l'analyse s'arrête
     saveState();
+    if (/429/.test(e.message) && S.retry.n < 6) { // Steam nous a freinés : on réessaie tout seul dans 5 minutes (l'analyse déjà faite est conservée)
+      S.retry = { at: Date.now() + 5 * 60e3, n: S.retry.n + 1 };
+      setTimeout(() => { if (!S.running && !S.demo && S.retry.at) run(cfg); }, 5 * 60e3).unref();
+    }
   }
   S.running = false;
 }
@@ -154,7 +146,8 @@ async function run(cfg, force = false) {
 function reset() {
   runId++;
   Object.assign(S, { demo: false, running: false, refreshing: false, phase: '', done: 0, total: 0, error: null, profile: null, names: new Map(), myCards: [], boosters: [], sets: [], completed: [], updatedAt: 0 });
-  Object.assign(S.bot, { status: 'idle', error: null, id: null, map: new Map(), apps: null, count: 0, t: 0 });
+  Object.assign(S.bot, { status: 'idle', error: null, apps: null, count: 0, games: 0, t: 0 });
+  S.retry = { at: 0, n: 0 };
   Object.assign(S.friends, { status: 'idle', error: null, done: 0, total: 0, list: [], inv: new Map() });
   Object.assign(S.rank, { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0 });
 }
@@ -186,6 +179,7 @@ async function scanFriends(cfg) {
     if (S.demo) { F.total = F.list.length; return demo.fillFriends(F, S); }
     F.list = await steam.getFriends(cfg.key, S.profile.steamid);
     F.total = F.list.length;
+    while (S.running) await steam.sleep(2000); // on n'envoie pas deux rafales à Steam en même temps
     const wanted = new Set(S.sets.flatMap((s) => s.cards.filter((c) => !c.owned).map((c) => c.hash)));
     for (const f of F.list) {
       try {
@@ -226,23 +220,22 @@ async function scanRank(cfg) {
 function loadDemo() { Object.assign(S, { demo: true, running: false, error: null }, demo.demoState()); demo.demoCredits(sce); }
 
 // ---------- vue envoyée à l'interface ----------
-// Ajoute au set les infos du bot, des amis et des crédits SteamCardExchange.
+// Ajoute au set les infos du bot SteamCardExchange (stock, valeur en crédits), des amis et des crédits.
 function enrichSet(s, cpc = 0) {
-  const B = S.bot, F = S.friends;
+  const F = S.friends;
+  const bi = sce.botInfo(s.appid); // { worth, stock, cardsInSet, setsAvail, distinct }
   const missing = s.cards.filter((c) => !c.owned);
-  const credit = (c) => { const v = sce.cardCredits(s.appid, c.name); return v != null ? v : cpc || null; };
-  const cards = s.cards.map((c) => ({ ...c, assetids: undefined, bot: c.owned ? 0 : (B.map.get(c.hash) || []).length, credits: credit(c) }));
+  const worth = bi ? bi.worth : cpc || null; // crédits que le bot donne pour une carte de ce jeu
+  const cards = s.cards.map((c) => ({ ...c, assetids: undefined, credits: worth }));
   const friends = F.list.map((f) => {
     const inv = F.inv.get(f.steamid); if (!inv) return null;
     const have = missing.filter((c) => inv.has(c.hash)).map((c) => c.hash);
     return have.length ? { steamid: f.steamid, name: f.name, avatar: f.avatar, have } : null;
   }).filter(Boolean).sort((a, b) => b.have.length - a.have.length);
-  const known = cards.filter((c) => c.credits != null);
-  const sum = (arr, f) => +arr.reduce((t, c) => t + f(c), 0).toFixed(2);
-  return { ...s, cards, botHas: cards.filter((c) => !c.owned && c.bot).length, friends,
-    credits: known.length ? sum(cards.filter((c) => !c.owned && c.credits != null), (c) => c.credits) : null,
-    creditsOwned: known.length ? sum(cards.filter((c) => c.owned), (c) => c.credits * c.owned) : null,
-    creditsRead: sce.hasGame(s.appid), stale: Date.now() - (s.priceT || 0) > PRICE_TTL };
+  const ownedCount = s.cards.reduce((t, c) => t + c.owned, 0);
+  return { ...s, cards, friends, worth, creditsOwned: worth != null ? +(worth * ownedCount).toFixed(2) : null,
+    botStock: bi ? bi.stock : 0, botDistinct: bi ? Math.min(bi.distinct, s.total) : 0, botSets: bi ? bi.setsAvail : 0, botHas: bi ? Math.min(bi.distinct, missing.length) : 0,
+    stale: Date.now() - (s.priceT || 0) > PRICE_TTL };
 }
 
 function snapshot(opt = {}) {
@@ -252,17 +245,19 @@ function snapshot(opt = {}) {
   const p = S.profile, gain = sets.length * 100;
   const fetchLeft = Math.max(0, S.needFetch - S.fetched);
   const manual = opt.creditsBalance === '' || opt.creditsBalance == null ? null : Number(opt.creditsBalance);
-  const scest = sce.status();
+  const scest = sce.status(), info = sce.invMap();
+  const valueOf = (cards) => +cards.reduce((t, c) => t + ((info.get(c.appid) || {}).worth || 0), 0).toFixed(2);
+  const ownedValue = info.size ? valueOf(S.myCards) : null;        // ce que le bot te donnerait pour toutes tes cartes
+  const spareValue = info.size ? valueOf(spareCards()) : null;      // … pour tes seules cartes en trop
   return {
     demo: S.demo, currency: S.currency, profile: p, sets, completed: S.completed, boosters, updatedAt: S.updatedAt,
-    progress: { running: S.running, refreshing: S.refreshing, phase: S.phase, done: S.done, total: S.total, fetchLeft, etaMin: Math.ceil((fetchLeft * 2.6) / 60),
-      wait: Math.max(0, Math.round((steam.rate.waitUntil - Date.now()) / 1000)), error: S.error },
-    bot: { status: B.status, error: B.error, name: B.name, avatar: B.avatar, count: B.count, games: B.apps ? B.apps.size : 0, botOnly: S.botOnly },
+    progress: { running: S.running, refreshing: S.refreshing, phase: S.phase, done: S.done, total: S.total, fetchLeft, etaMin: Math.ceil((fetchLeft * 3.1) / 60),
+      wait: Math.max(0, Math.round((steam.rate.waitUntil - Date.now()) / 1000)), retryIn: S.retry.at ? Math.max(0, Math.round((S.retry.at - Date.now()) / 1000)) : 0, error: S.error },
+    bot: { status: B.status, error: B.error, name: B.name, count: B.count, games: B.games, botOnly: S.botOnly },
     friends: { status: F.status, error: F.error, done: F.done, total: F.total, count: F.list.length },
     rank: { status: S.rank.status, error: S.rank.error, done: S.rank.done, total: S.rank.total, list: S.rank.list },
     projection: p && { gainXp: gain, level: levelFromXp(p.xp + gain).level, nextLevelXp: totalXpForLevel(p.level + 1) - p.xp },
-    credits: { balance: scest.balance != null ? scest.balance : manual, perCard: cpc || null, sce: scest,
-      ownedValue: sets.some((s) => s.creditsOwned != null) ? +sets.reduce((t, s) => t + (s.creditsOwned || 0), 0).toFixed(2) : null },
+    credits: { balance: scest.balance != null ? scest.balance : manual, perCard: cpc || null, sce: scest, ownedValue, spareValue },
   };
 }
 

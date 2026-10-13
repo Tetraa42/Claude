@@ -10,7 +10,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // Quand Steam limite le débit (429) on attend puis on reprend : rien n'est perdu.
 const rate = { waitUntil: 0 };
 let lastCommunity = 0;
-const gapFor = (url) => (url.includes('/market/search') ? 2500 : url.includes('/inventory/') ? 1200 : 1500);
+const gapFor = (url) => (url.includes('/market/search') ? 3000 : url.includes('/inventory/') ? 3000 : 1500); // Steam bloque (429) si on va plus vite
 
 async function jget(url) {
   const community = url.includes('steamcommunity.com');

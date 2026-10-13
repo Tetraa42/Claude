@@ -38,11 +38,22 @@ const sceBridge = {
     const w = new BrowserWindow({ width: 1100, height: 800, title: 'SteamCardExchange — connecte-toi avec Steam puis ferme cette fenêtre', webPreferences: { partition: 'persist:sce' }, autoHideMenuBar: true });
     w.loadURL('https://www.steamcardexchange.net/'); w.on('closed', resolve);
   }),
-  async scrape(url) { // renvoie le texte visible + tous les liens de la page (menu replié compris)
+  async scrape(url, opts = {}) { // texte visible + liens ; avec { table: true } : affiche « All » dans le tableau et renvoie ses lignes
     const w = new BrowserWindow({ show: false, webPreferences: { partition: 'persist:sce' } });
     try {
       await w.loadURL(url); await new Promise((r) => setTimeout(r, 2500));
-      return await w.webContents.executeJavaScript(`({ text: document.body.innerText, links: [...document.querySelectorAll('a[href]')].map((a) => ({ t: (a.innerText || a.title || a.getAttribute('aria-label') || '').trim().replace(/\\s+/g, ' ').slice(0, 60), h: a.href })) })`);
+      if (opts.table) {
+        await w.webContents.executeJavaScript(`(async () => {
+          const sel = document.querySelector('select[name$="_length"]');
+          if (sel) { const all = [...sel.options].find((o) => /all|tous/i.test(o.text) || o.value === '-1') || sel.options[sel.options.length - 1]; sel.value = all.value; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+          await new Promise((r) => setTimeout(r, 4000));
+        })()`);
+      }
+      return await w.webContents.executeJavaScript(`({
+        text: document.body.innerText.slice(0, 20000),
+        links: [...document.querySelectorAll('a[href]')].slice(0, 400).map((a) => ({ t: (a.innerText || a.title || a.getAttribute('aria-label') || '').trim().replace(/\\s+/g, ' ').slice(0, 60), h: a.href })),
+        rows: ${opts.table ? "[...document.querySelectorAll('table tbody tr')].map((tr) => ({ c: [...tr.children].map((td) => td.innerText.trim().replace(/\\s+/g, ' ')), h: (tr.querySelector('a[href*=\"gamepage-appid-\"]') || {}).href || '' }))" : 'null'}
+      })`);
     } finally { w.destroy(); }
   },
 };

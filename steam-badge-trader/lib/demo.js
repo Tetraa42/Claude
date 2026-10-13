@@ -33,7 +33,7 @@ function svgBanner(appid) {
 }
 
 function demoState() {
-  const sets = [], myCards = [], botMap = new Map();
+  const sets = [], myCards = [];
   GAMES.forEach((g, i) => {
     const total = 5 + (i % 3);
     const cards = Array.from({ length: total }, (_, k) => {
@@ -42,7 +42,6 @@ function demoState() {
       const hash = `${g.appid}-${CARD_NAMES[k]}`;
       const assetids = Array.from({ length: owned }, (_, j) => `d${g.appid}_${k}_${j}`);
       assetids.forEach((id) => myCards.push({ assetid: id, hash, name: CARD_NAMES[k], appid: g.appid, img: cardUrl(g.appid, k), tradable: true }));
-      if (!owned && (k + i) % 2 === 0) botMap.set(hash, [{ assetid: 'b' + hash }]);
       return { hash, name: CARD_NAMES[k], price, priceText: price.toFixed(2).replace('.', ',') + '€', listings: 120 + k * 9, img: cardUrl(g.appid, k), owned, assetids };
     });
     const missing = cards.filter((c) => !c.owned);
@@ -55,7 +54,8 @@ function demoState() {
     sets, myCards, currency: 3,
     profile: { steamid: '76561198000000000', name: 'quarantdeux (démo)', avatar: '/art/avatar.svg', url: 'https://steamcommunity.com/id/quarantdeux/', level: L.level, xp, intoLevel: L.intoLevel, needed: L.needed, badges: [] },
     completed: [['Ocean Keepers', 120], ['Rogue Station', 260], ['Tiny Tanks', 20]].map(([name, hue], i) => ({ appid: 800000 + i, name, level: 5, banner: `/art/banner/${800000 + i}.svg` })),
-    bot: { status: 'ready', error: null, id: 'bot', name: 'CardExchange (démo)', avatar: null, map: botMap, apps: new Set(GAMES.map((g) => g.appid)), count: 18420, t: Date.now() },
+    bot: { status: 'ready', error: null, name: 'SteamCardExchange (démo)', apps: new Set(GAMES.map((g) => g.appid)), count: 18420, games: GAMES.length, t: Date.now() },
+    retry: { at: 0, n: 0 },
     friends: { status: 'idle', error: null, done: 0, total: FRIENDS.length, list: FRIENDS.map((n, i) => ({ steamid: '7656119800' + i, name: n, avatar: '/art/avatar.svg' })), inv: new Map() },
     boosters: GAMES.slice(0, 3).flatMap((g, i) => Array.from({ length: i + 1 }, (_, k) => ({ assetid: `bo${g.appid}_${k}`, appid: g.appid, name: g.name + ' Booster Pack', game: g.name, img: cardUrl(g.appid, 4 + i), tradable: true }))),
     rank: { status: 'idle', error: null, done: 0, total: 0, list: [], t: 0 },
@@ -72,8 +72,7 @@ function demoRank(S) {
 
 
 function demoCredits(sce) {
-  const names = ['Héros', 'Gardien', 'Ombre', 'Relique', 'Forteresse', 'Dragon', 'Éclair', 'Mage', 'Voyageur'];
-  sce.setDemo(GAMES.map((g) => g.appid), names);
+  sce.setDemo(GAMES.map((g, i) => ({ appid: g.appid, worth: 3 + i * 2, stock: 6 + i * 3, cardsInSet: 5 + (i % 3), setsAvail: i % 3 === 0 ? 1 : 0, distinct: 2 + (i % 4) })));
 }
 
 function fillFriends(F, S) {

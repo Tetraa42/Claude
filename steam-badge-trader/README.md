@@ -8,7 +8,7 @@ Télécharge `Steam-Badge-Trader-Setup-x.x.x.exe` depuis l'onglet **Releases** d
 ## Fonctions
 - Analyse en tâche de fond : les sets apparaissent au fur et à mesure, Steam qui limite le débit (429) = l'app attend et reprend toute seule, le cache (12 h) évite de tout refaire à chaque « Actualiser ».
 - Filtres : presque à 100 %, prêts à crafter, nouveaux badges, badges en cours, doublons, < 0,50 €, chez le bot, chez des amis, badges terminés.
-- 🤖 Bot CardExchange : son inventaire est comparé à tes cartes manquantes. 👥 Amis : « Scanner mes amis » (liste d'amis publique requise).
+- 🤖 Bot SteamCardExchange : son inventaire est lu depuis le tableau « Inventory » du site (stock, cartes différentes, valeur en crédits par jeu) — pas depuis Steam, trop gros (Steam bloquait avec des erreurs 429). Les échanges avec le bot se font sur son site (« Make Offer »). 👥 Amis : « Scanner mes amis » (liste d'amis publique requise ; lent : ~3 s par ami).
 
 ## Fiche badge, panier, crédits
 - Clique sur un jeu : fiche avec cartes, prix, crédits, boosters (bouton d'ouverture), et échanges possibles (bot / amis).

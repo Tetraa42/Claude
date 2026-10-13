@@ -5,7 +5,7 @@
 <header class="hero">
   <div class="who"><img id="avatar" alt=""><div><h1 id="name">Chargement…</h1><div class="sub" id="sub"></div></div></div>
   <div class="level"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" class="track"/><circle id="ring" cx="60" cy="60" r="52" class="ring"/></svg><div class="lv"><small>NIVEAU</small><b id="lvl">–</b></div></div>
-  <div class="goal"><div class="kpi"><span id="proj">–</span><small>niveau atteignable</small></div><div class="kpi"><span id="gain">–</span><small>XP à gagner</small></div><div class="kpi"><span id="tot">–</span><small>coût total</small></div><div class="kpi" id="kcred" hidden><span id="cred">–</span><small>crédits SCE</small></div><div class="kpi" id="kcval" hidden><span id="cval">–</span><small>valeur de mes cartes</small></div></div>
+  <div class="goal"><div class="kpi"><span id="proj">–</span><small>niveau atteignable</small></div><div class="kpi"><span id="gain">–</span><small>XP à gagner</small></div><div class="kpi"><span id="tot">–</span><small>coût total</small></div><div class="kpi" id="kcred" hidden><span id="cred">–</span><small>crédits SCE</small></div><div class="kpi" id="kcval" hidden><span id="cval">–</span><small>valeur de mes cartes (crédits)</small></div></div>
 </header>
 <main>
   <div class="status" id="status" hidden><div class="spin"></div><div class="st"><b id="stt"></b><div class="meter"><i id="stbar" style="width:0"></i></div><small id="sts"></small></div></div>
@@ -14,7 +14,7 @@
 
   <section id="v-sets">
     <div class="sources">
-      <div class="src"><b>🤖 Bot CardExchange</b><span id="botst">…</span><button id="botref" class="ghost sm" title="Recharger l'inventaire du bot">↻</button></div>
+      <div class="src"><b>🤖 Bot SteamCardExchange</b><span id="botst">…</span><button id="botref" class="ghost sm" title="Relire l'inventaire du bot sur le site">↻</button></div>
       <div class="src"><b>💳 SteamCardExchange</b><span id="scest">non connecté</span><button id="scebtn" class="ghost sm">Lire mes crédits</button></div>
       <div class="src"><b>👥 Amis</b><span id="frst">non analysés</span><button id="frscan" class="ghost sm">Scanner mes amis</button></div>
     </div>
@@ -47,7 +47,7 @@
 
 <dialog id="dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form>
   <h3 id="dt">Échange — panier</h3><p class="mut" id="dsub"></p>
-  <div class="tabs" id="tabs"><button data-s="bot" class="on">🤖 Bot</button><button data-s="friend">👥 Ami</button><button data-s="url">🔗 Lien</button></div>
+  <div class="tabs" id="tabs"><button data-s="bot">🤖 Bot (site)</button><button data-s="friend" class="on">👥 Ami</button><button data-s="url">🔗 Lien</button></div>
   <div id="srcbox"></div>
   <div id="pv" class="pv" hidden><div><h4>Tu reçois <span id="askn"></span></h4><div id="askl" class="mini"></div></div><div class="arrow">⇄</div><div><h4>Tu donnes <span id="givn"></span></h4><div id="givel" class="mini"></div></div></div>
   <p id="note" class="note"></p>
@@ -67,18 +67,15 @@
     <label class="lab">Adresse de ton profil Steam<input id="s_profile" placeholder="https://steamcommunity.com/id/quarantdeux/"></label>
     <label class="lab">Clé API Steam <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">→ la créer (domaine : localhost)</a><input id="s_key" placeholder="32 caractères"></label>
     <label class="lab">Monnaie<select id="s_cur"><option value="3">Euro (€)</option><option value="1">Dollar ($)</option><option value="2">Livre (£)</option></select></label></section>
-  <section class="sec"><h4>🤖 Bot CardExchange</h4>
-    <label class="check"><input type="checkbox" id="s_botonly"> Scanner seulement les jeux que possède le bot (beaucoup plus rapide)</label>
-    <label class="lab">Profil du bot<input id="s_bot" placeholder="https://steamcommunity.com/id/CardExchange"></label>
-    <label class="lab">Lien d'échange du bot (pour lui envoyer des offres)<input id="s_boturl"></label></section>
-  <section class="sec"><h4>💳 Crédits SteamCardExchange</h4>
-    <p class="mut small">Connecte-toi au site avec Steam : l'app lit ensuite ton solde et les crédits de chaque carte. (La lecture est automatique mais le site n'a pas pu être vérifié depuis ici : si ça ne remonte rien, copie le diagnostic et envoie-le moi.)</p>
+  <section class="sec"><h4>🤖 Bot SteamCardExchange</h4>
+    <label class="check"><input type="checkbox" id="s_botonly"> Scanner seulement les jeux que le bot a en stock (beaucoup plus rapide, évite le blocage de Steam)</label></section>
+  <section class="sec"><h4>💳 SteamCardExchange : crédits et inventaire du bot</h4>
+    <p class="mut small">Connecte-toi au site avec Steam (fenêtre intégrée) : l'app lit ton solde de crédits (page Profile) et l'inventaire du bot (stock, valeur d'une carte en crédits).</p>
     <div class="updrow"><button id="sceLogin" class="ghost">🔑 Se connecter à SteamCardExchange</button><button id="sceBal" class="ghost">↻ Lire mon solde</button></div>
     <p id="sceInfo" class="note"></p>
-    <div class="updrow"><button id="sceScan" class="ghost">💳 Lire les crédits de mes sets</button><button id="sceDbg" class="ghost">📋 Copier le diagnostic</button></div>
-    <p class="mut small">À défaut, saisie manuelle :</p>
-    <label class="lab">Mes crédits<input id="s_cbal" inputmode="decimal" placeholder="ex. 12.5"></label>
-    <label class="lab">Coût d'une carte en crédits<input id="s_cpc" inputmode="decimal" placeholder="ex. 1"></label></section>
+    <div class="updrow"><button id="sceScan" class="ghost">🤖 Relire l'inventaire du bot</button><button id="sceDbg" class="ghost">📋 Copier le diagnostic</button></div>
+    <p class="mut small">Si le solde n'est pas trouvé, saisie manuelle :</p>
+    <label class="lab">Mes crédits<input id="s_cbal" inputmode="decimal" placeholder="ex. 15"></label></section>
   <section class="sec"><h4>🌍 Classement des utilisateurs</h4>
     <label class="lab">Adresse du serveur de classement<input id="s_lb" placeholder="https://… (voir leaderboard-server/README.md)"></label></section>
   <details class="sec"><summary>Échanges et boosters : connexion Steam (optionnel)</summary>
