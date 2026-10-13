@@ -196,3 +196,10 @@ dialog>form[method=dialog]{position:sticky;top:0;z-index:60;height:0}
 .fan .fc .st{position:absolute;right:3px;top:3px;font-size:13px;line-height:1.1;background:#000b;border-radius:6px;padding:0 3px;color:#facc15}
 .fan .fc.wished img{box-shadow:0 0 0 2px #facc15,0 6px 14px #0008}.fan .fc:hover{transform:translateY(-3px);z-index:2}
 details.cbox>summary{cursor:pointer}
+/* amis : tuiles dans un menu déroulant par ami */
+.fdet>summary{cursor:pointer;display:flex;align-items:center;gap:8px;flex-wrap:wrap;list-style:none}.fdet>summary::-webkit-details-marker{display:none}.fdet>summary:before{content:"▸";color:var(--mut)}.fdet[open]>summary:before{content:"▾"}
+.fav{width:34px;height:34px;border-radius:10px;object-fit:cover}.fgrid{margin-top:12px}.set.finish{border-color:var(--ok)}
+.fc2{position:relative;flex:0 1 76px;min-width:0;margin-left:-8px}.fc2 img{margin:0;width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px;border:3px solid var(--line);box-shadow:0 6px 14px #0008;background:var(--bg2);flex:none}
+.fc2.give img{border-color:#22c55e}.fc2.need img{border-color:var(--cfr)}.fc2.has img{opacity:.5}.fc2.lack img{border-color:#ef4444}
+.legend .give:before{background:#22c55e}.legend .need:before{background:var(--cfr)}.legend .lack:before{background:#ef4444}.legend .has:before{background:var(--mut)}
+.addbk{margin-top:6px}.addbk.on{border-color:var(--ok);color:var(--ok)}.cost b{color:var(--tx)}

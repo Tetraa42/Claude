@@ -76,7 +76,7 @@ app.post('/api/refresh', (_, res) => { // « Tout actualiser » : badges puis ca
 });
 // Boutons de scan : chacun lance une tâche indépendante dont la progression est dans /api/state (tasks)
 const scanFn = (k) => { const c = cfg(); return { badges: () => engine.scanBadges(c), cards: () => engine.scanCards(c), boosters: () => engine.scanBoosters(c), gems: () => engine.scanGems(c),
-  bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance(), verify: () => engine.scanVerify() }[k]; };
+  bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance(), verify: () => engine.scanVerify({ cfg: c }) }[k]; };
 app.post('/api/scan/:task', (req, res) => {
   const k = req.params.task, fn = scanFn(k);
   if (!fn) return res.status(400).json({ error: 'Scan inconnu' });
@@ -109,7 +109,7 @@ app.get('/api/auto/data', (_, res) => { try { res.json(engine.autoData()); } cat
 app.post('/api/auto/plan', (req, res) => { try { res.json(engine.autoPlan(req.body.asks || [], req.body.gives || [])); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/auto/open', (req, res) => { try { res.json(sce.openGame(Number(req.body.appid), req.body.names || [])); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.get('/api/friends/needs', (_, res) => { try { res.json(engine.friendNeeds()); } catch (e) { res.status(400).json({ error: e.message }); } });
-app.post('/api/botcheck', (_, res) => { if (isDemo()) { Promise.resolve(engine.scanVerify({ all: true, force: true })).catch(() => {}); } else Promise.resolve(engine.scanVerify({ all: true, force: true })).catch((e) => { S.error = e.message; }); res.json({ ok: true }); });
+app.post('/api/botcheck', (_, res) => { if (isDemo()) { Promise.resolve(engine.scanVerify({ all: true, force: true, cfg: cfg() })).catch(() => {}); } else Promise.resolve(engine.scanVerify({ all: true, force: true, cfg: cfg() })).catch((e) => { S.error = e.message; }); res.json({ ok: true }); });
 app.get('/api/goal', (req, res) => { try { res.json(engine.goalPlan(req.query.level)); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.get('/api/spare', (_, res) => { try { res.json(engine.spareReport()); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/event/add', (req, res) => { try { engine.eventAdd(req.body.name, req.body.start, req.body.end); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
@@ -289,8 +289,8 @@ app.post('/api/trade/send', async (req, res) => {
   try {
     const { source, tradeUrl, friendId, give, ask } = req.body;
     if (isDemo()) return res.json({ id: '000000', status: 'sent', note: 'Mode démo : aucune offre réelle envoyée.' });
-    if (!Array.isArray(ask) || !ask.length) throw new Error('Rien à demander : aucune carte manquante chez cette source.');
     if (!Array.isArray(give)) throw new Error('Liste de cartes à donner invalide.');
+    if (!Array.isArray(ask) || (!ask.length && !(req.body.gift && give.length))) throw new Error('Rien à demander : aucune carte manquante chez cette source.');
     const mine = new Set(S.myCards.map((c) => String(c.assetid)));
     if (give.some((id) => !mine.has(String(id)))) throw new Error('Une carte à donner n\'est plus dans ton inventaire : clique sur Actualiser puis recommence.');
     const partner = source === 'friend' ? friendId : source === 'bot' ? (tradeUrl || env.BOT_TRADE_URL) : tradeUrl;
