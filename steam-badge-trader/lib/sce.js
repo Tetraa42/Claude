@@ -217,6 +217,10 @@ function openGame(appid, names, mode) {
   if (bridge && bridge.openGame) { bridge.openGame(url, names || [], mode || 'buy'); return { opened: true, url }; }
   return { opened: false, url };
 }
+function openSteamTrade(url, payload) {
+  if (bridge && bridge.openTrade) { bridge.openTrade(url, payload); return { opened: true, url }; }
+  return { opened: false, url };
+}
 const gameUrl = (appid) => `${HOME}index.php?inventorygame-appid-${appid}`;
 const gameAge = (appid) => { const g = gameData(appid); return g ? Date.now() - g.t : Infinity; };
 const hasGame = (appid) => { const g = gameData(appid); return !!g && Object.keys(g.cards).length > 0; };
@@ -233,4 +237,4 @@ const status = () => { const d = load(); return { available: !!bridge || demoOn,
   games: index().stocked, invAge: d.inv ? d.inv.t : 0, hasDebug: !!d.debug }; };
 const debug = () => load().debug || '';
 const reset = () => { if (demoOn) { demoOn = false; D = null; } };
-module.exports = { setBridge, login, refreshBalance, readInventory, readBadgePrices, badgePrice, checkGame, parseGameText, parseTrades, trades, openGame, gameUrl, gameAge, demoGame, hasGame, cardInfo, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };
+module.exports = { setBridge, login, refreshBalance, readInventory, readBadgePrices, badgePrice, checkGame, parseGameText, parseTrades, trades, openGame, openSteamTrade, gameUrl, gameAge, demoGame, hasGame, cardInfo, lookup, hasData, totals, status, debug, flush, setDemo, reset, findCredits, parseRow };

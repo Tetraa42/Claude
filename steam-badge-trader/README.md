@@ -76,3 +76,11 @@ Pour ton vrai compte : copie `.env.example` en `.env`, mets ta clé API Steam (h
 - **Rien sans ta validation** : toute offre Steam passe par une page de confirmation (cartes prises / données, totaux) ; le serveur refuse tout envoi sans `confirmed`. Les pages Steam / SteamCardExchange s'ouvrent dans une fenêtre de l'application (session déjà connectée).
 - **Mode auto** : choix « Trader avec le bot / avec mes amis / Vendre mes cartes », recherche dans l'inventaire, filtres et tris, vente de tous les doubles ou d'une sélection (paquets de 6 cartes max). Fenêtre du bot avec un bouton « Quick-Trade » par carte (un clic de ta part).
 - **Page des badges** : filtres regroupés dans un menu, 17 tris, cartes manquantes de la même taille que les autres ; bouton « 💱 Prix du site » dans le menu pour lire les prix d'achat et de rachat de tes cartes.
+
+## Nouveautés (v1.0.23)
+- **Amis** : infos cliquables (🎁 à donner, ⭐ pour toi, 🎮 jeux), bouton on/off « doublons seulement », composition d'échange favorable à l'ami (cartes de ce jeu ou d'un autre) avec choix des cartes données/prises.
+- **Profil d'ami** (clic sur son nom dans Amis ou Classement) : onglets Progrès / Sets / Boosters / Souhaits & échanges, bouton de retour.
+- **Souhaits** : sélection de cartes puis échange. **Progrès** : objectif de niveau en menu déroulant.
+- **Classement** : colonnes Cartes et Boosters.
+- **Mode auto** : ouvre directement la fenêtre d'échange Steam dans l'app, cartes préparées (tu cliques seulement pour valider).
+- ✕ pour effacer les barres de recherche, menus déroulants colorés, **Bons plans** refondu (explications, sets prêts/presque finis, doublons → crédits, marché vs bot).

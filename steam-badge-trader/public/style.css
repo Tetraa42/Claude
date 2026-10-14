@@ -216,3 +216,9 @@ details.cbox>summary{cursor:pointer}
 .atool{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0}.atool input{flex:1;min-width:120px;padding:7px 10px}.atool select{padding:7px 8px;background:var(--bg2);color:var(--tx);border:1px solid var(--line);border-radius:10px;font:inherit}
 .cfgrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:10px 0}.cfcol h4{margin:0 0 6px}.cfsum{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0}
 @media (max-width:700px){.cfgrid{grid-template-columns:1fr}}
+/* menus déroulants colorés */
+.selbox,.atool select,.search select{background:linear-gradient(135deg,color-mix(in srgb,var(--ac) 26%,var(--bg2)),color-mix(in srgb,var(--ac2) 20%,var(--bg2)));border:1px solid color-mix(in srgb,var(--ac) 55%,var(--line));border-radius:10px}
+.selbox select{background:transparent;color:var(--tx);font-weight:600}
+select option,select optgroup{background:var(--card);color:var(--tx)}select optgroup{font-weight:700;color:var(--ac)}
+details.cbox>summary{list-style:none;cursor:pointer}details.cbox>summary::-webkit-details-marker{display:none}details.cbox>summary:before{content:"▸ ";color:var(--ac)}details.cbox[open]>summary:before{content:"▾ "}
+.wtool{padding:6px 0}.frow input[type=checkbox]{flex:none;width:18px;height:18px}

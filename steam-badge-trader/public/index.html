@@ -60,6 +60,11 @@
     <div id="fbody"></div>
   </section>
 
+  <section id="v-fprofile" hidden>
+    <div class="bar"><h2><button id="fpback" class="ghost">← Retour aux amis</button> <span id="fpname"></span></h2><div class="tabs inline" id="fptabs"><button data-p="prog" class="on">📈 Progrès</button><button data-p="sets">🃏 Sets</button><button data-p="boosters">📦 Boosters</button><button data-p="wish">⭐ Souhaits &amp; échanges</button></div></div>
+    <div id="fpbody"></div>
+  </section>
+
   <section id="v-journal" hidden>
     <div class="bar"><h2>Journal <small>échanges, achats et ventes</small></h2></div>
     <div id="jbody"></div>
@@ -75,6 +80,10 @@
 </main>
 
 <div id="basket" hidden><span id="bk"></span><span class="grow"></span><button id="bkview" class="ghost">👁 Voir le panier</button><button id="bkgo" class="ghost">⇄ Lancer l'échange</button><button id="bkclear" class="ghost sm">Vider</button></div>
+
+<dialog id="pdlg" class="wide-dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form><h3 id="pdt">Composer l'échange</h3><div id="pbody2"></div></dialog>
+
+<dialog id="fidlg" class="wide-dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form><h3 id="fit"></h3><div id="fibody"></div></dialog>
 
 <dialog id="cfdlg" class="wide-dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form><h3 id="cft">Vérifie et valide l'échange</h3><div id="cfbody"></div></dialog>
 

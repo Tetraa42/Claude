@@ -128,12 +128,13 @@ document.addEventListener('click', (e) => { if (!menu.hidden && !e.target.closes
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !menu.hidden) setMenu(false); });
 
 // ---------- liste de souhaits ----------
+const WSEL = new Set();
 function drawWish() {
   const w = st.wishlist || [], al = st.alerts || [], box = $('#wbody');
-  const sig = JSON.stringify([w, al]); if (box._sig === sig) return;
+  const sig = JSON.stringify([w, al, [...WSEL]]); if (box._sig === sig) return;
   if (box.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // on ne redessine pas pendant la saisie d'un prix
   box._sig = sig;
-  const cards = w.length ? `<div class="flist">${w.map((x) => `<div class="frow ${x.available ? 'hit' : ''}"><img src="${esc(x.img)}" alt=""><div class="grow"><b>${esc(x.name)}</b> <small class="mut">· ${esc(x.game)}</small><br><small>${x.owned ? '✔ tu l\'as déjà' : x.available ? '🔔 ' + [x.bot && x.bot.stock > 0 ? `le bot l'a (${x.bot.stock} en stock${x.bot.price != null ? ', ' + x.bot.price + ' cr' : ''})` : '', x.friends.length ? `chez ${x.friends.map((f) => esc(f.name)).join(', ')}` : '', x.priceHit ? `prix atteint : ${money(x.price)}` : ''].filter(Boolean).join(' · ') : x.botChecked ? 'pas disponible pour le moment (vérifié)' : 'pas encore vérifié'}${x.price != null ? ` · marché ${money(x.price)}` : ''}</small><br><small class="cost" title="Coût d'achat de la carte chez le bot SteamCardExchange">🤖 coût : <b>${x.bot && x.bot.price != null ? x.bot.price + ' cr' : '? cr <span class="mut">(vérifie le jeu)</span>'}</b>${x.worth != null ? ` · le site la rachète ${x.worth} cr` : ''}</small></div>
+  const cards = w.length ? `<div class="row wtool" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:8px"><small class="mut">${WSEL.size} carte(s) sélectionnée(s)</small><button class="ghost sm" data-wx="all">Tout sélectionner</button><button class="ghost sm" data-wx="avail">Celles disponibles</button><button class="ghost sm" data-wx="none">Aucune</button><button class="ghost sm" data-wx="basket" ${WSEL.size ? '' : 'disabled'}>🛒 Ajouter au panier</button><button class="go sm" data-wx="trade" ${WSEL.size ? '' : 'disabled'} style="width:auto;margin:0">⇄ Échanger la sélection</button></div><div class="flist">${w.map((x) => `<div class="frow ${x.available ? 'hit' : ''}"><input type="checkbox" data-wsel="${esc(x.hash)}" ${WSEL.has(x.hash) ? 'checked' : ''} ${x.owned ? 'disabled' : ''} title="Sélectionner cette carte"><img src="${esc(x.img)}" alt=""><div class="grow"><b>${esc(x.name)}</b> <small class="mut">· ${esc(x.game)}</small><br><small>${x.owned ? '✔ tu l\'as déjà' : x.available ? '🔔 ' + [x.bot && x.bot.stock > 0 ? `le bot l'a (${x.bot.stock} en stock${x.bot.price != null ? ', ' + x.bot.price + ' cr' : ''})` : '', x.friends.length ? `chez ${x.friends.map((f) => esc(f.name)).join(', ')}` : '', x.priceHit ? `prix atteint : ${money(x.price)}` : ''].filter(Boolean).join(' · ') : x.botChecked ? 'pas disponible pour le moment (vérifié)' : 'pas encore vérifié'}${x.price != null ? ` · marché ${money(x.price)}` : ''}</small><br><small class="cost" title="Coût d'achat de la carte chez le bot SteamCardExchange">🤖 coût : <b>${x.bot && x.bot.price != null ? x.bot.price + ' cr' : '? cr <span class="mut">(vérifie le jeu)</span>'}</b>${x.worth != null ? ` · le site la rachète ${x.worth} cr` : ''}</small></div>
       <label class="tgt" title="M'avertir quand cette carte coûte moins que ce prix sur le marché">🔔 ≤ <input data-target="${esc(x.hash)}" inputmode="decimal" placeholder="prix" value="${esc(x.target || '')}"></label>
       ${x.bot && x.bot.stock > 0 ? `<a class="ghost sm" href="${esc(x.url)}" target="_blank" rel="noopener">Ouvrir chez le bot ↗</a>` : ''}<button class="ghost sm" data-unwish="${esc(x.hash)}">Retirer</button></div>`).join('')}</div>`
     : '<div class="sbox">Aucune carte surveillée. Ouvre un jeu et clique sur l\'étoile ☆ d\'une carte manquante : l\'app te prévient dès que le bot (ou un ami) l\'a, ou quand son prix passe sous le seuil que tu fixes.</div>';
@@ -145,6 +146,14 @@ $('#wbody').addEventListener('click', safe(async (e) => {
   const u = e.target.closest('[data-unalert]'); if (u) { await api('/api/alert/set', { appid: u.dataset.unalert, target: 0 }); poll(); }
 }));
 $('#wbody').addEventListener('change', safe(async (e) => { const t = e.target.closest('[data-target]'); if (t) { await api('/api/wish/target', { hash: t.dataset.target, target: t.value }); toast(t.value ? `🔔 Alerte à ${t.value}` : 'Alerte retirée'); poll(); } }));
+$('#wbody').addEventListener('change', (e) => { const h = e.target.dataset.wsel; if (h === undefined) return; e.target.checked ? WSEL.add(h) : WSEL.delete(h); $('#wbody')._sig = ''; drawWish(); });
+$('#wbody').addEventListener('click', (e) => {
+  const x = e.target.closest('[data-wx]'); if (!x) return;
+  const w = (st.wishlist || []).filter((y) => !y.owned), k = x.dataset.wx;
+  if (k === 'all') w.forEach((y) => WSEL.add(y.hash)); else if (k === 'avail') { WSEL.clear(); w.filter((y) => y.available).forEach((y) => WSEL.add(y.hash)); } else if (k === 'none') WSEL.clear();
+  else { const hs = [...WSEL]; toggleCards(hs, true, false); if (k === 'trade') { WSEL.clear(); $('#wbody')._sig = ''; return openTrade(); } toast(`🛒 ${hs.length} carte(s) ajoutée(s) au panier`); }
+  $('#wbody')._sig = ''; drawWish();
+});
 $('#wcheck').onclick = safe(async () => { await api('/api/wish/check', {}); await poll(); toast('Liste de souhaits revérifiée'); });
 // ---------- progrès : historique et rythme ----------
 function lineChart(pts, key, color, fmt = (v) => nf(Math.round(v))) {
@@ -174,9 +183,10 @@ function drawProg() {
   const lvl = st.profile ? st.profile.level : 0, goal = prefs.goal && prefs.goal > lvl ? prefs.goal : lvl + 5;
   const drops = (st.dropsList || []).slice(0, 30), dTot = (st.dropsList || []).reduce((t, x) => t + x.drops, 0);
   box.innerHTML = top + `
-  <div class="cbox sec2"><h4>🎯 Objectif de niveau</h4><div class="row" style="justify-content:flex-start;gap:10px"><label class="tgt" style="font-size:14px">Niveau visé <input id="goalin" type="number" min="${lvl + 1}" value="${goal}" style="width:90px"></label><button id="goalgo" class="ghost">Calculer le plan</button></div><div id="goalout"></div></div>
-  <div class="cbox sec2"><h4>🎴 À récupérer en jouant ${dTot ? `<small class="mut">— ${nf(dTot)} carte(s) dans ${(st.dropsList || []).length} jeu(x)</small>` : ''}</h4>${drops.length ? `<div class="flist">${drops.map((d) => `<div class="frow"><img src="${esc(d.banner)}" alt="" style="width:90px;height:42px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'"><div class="grow"><b>${esc(d.name)}</b><br><small>${d.drops} carte(s) à obtenir</small></div><a class="ghost sm" href="steam://run/${d.appid}">▶ Lancer le jeu</a></div>`).join('')}</div>` : '<p class="mut small">Aucune carte à récupérer en jouant (ou page des badges pas encore lue).</p>'}</div>
-  <div class="cbox sec2"><h4>📅 Soldes et événements Steam</h4>${(st.events || []).length ? `<div class="flist">${st.events.map((e) => `<div class="frow"><div class="grow"><b>${esc(e.name)}</b>${e.approx ? ' <small class="mut" title="Dates indicatives : vérifie-les sur Steam et supprime / ajoute au besoin">· dates indicatives</small>' : ''}<br><small>${new Date(e.startMs).toLocaleDateString('fr-FR')} → ${new Date(e.endMs).toLocaleDateString('fr-FR')} · <b>${dayWord(e.startMs)}</b></small></div><button class="ghost sm" data-evdel="${esc(e.id)}">Retirer</button></div>`).join('')}</div>` : '<p class="mut small">Aucun événement à venir.</p>'}<div style="margin-top:8px"><button class="ghost sm" id="evadd">➕ Ajouter un événement</button></div></div>`;
+  <details class="cbox sec2" data-sec="goal" ${prefs.goalOpen ? 'open' : ''}><summary><h4 style="display:inline">🎯 Objectif de niveau</h4> <small class="mut">— choisis un niveau, l'app calcule les badges les moins chers</small></summary><div class="row" style="justify-content:flex-start;gap:10px;margin-top:8px"><label class="selbox">Niveau visé <select id="goalin">${Array.from({ length: 40 }, (_, i) => lvl + 1 + i).map((n) => `<option value="${n}" ${n === goal ? 'selected' : ''}>Niveau ${n}</option>`).join('')}</select></label><button id="goalgo" class="ghost">Calculer le plan</button></div><div id="goalout"></div></details>
+  <details class="cbox sec2" data-sec="drops" ${prefs.dropsOpen ? 'open' : ''}><summary><h4 style="display:inline">🎴 À récupérer en jouant ${dTot ? `<small class="mut">— ${nf(dTot)} carte(s) dans ${(st.dropsList || []).length} jeu(x)</small>` : ''}</h4></summary>${drops.length ? `<div class="flist">${drops.map((d) => `<div class="frow"><img src="${esc(d.banner)}" alt="" style="width:90px;height:42px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'"><div class="grow"><b>${esc(d.name)}</b><br><small>${d.drops} carte(s) à obtenir</small></div><a class="ghost sm" href="steam://run/${d.appid}">▶ Lancer le jeu</a></div>`).join('')}</div>` : '<p class="mut small">Aucune carte à récupérer en jouant (ou page des badges pas encore lue).</p>'}</details>
+  <details class="cbox sec2" data-sec="events" ${prefs.eventsOpen ? 'open' : ''}><summary><h4 style="display:inline">📅 Soldes et événements Steam</h4></summary>${(st.events || []).length ? `<div class="flist">${st.events.map((e) => `<div class="frow"><div class="grow"><b>${esc(e.name)}</b>${e.approx ? ' <small class="mut" title="Dates indicatives : vérifie-les sur Steam et supprime / ajoute au besoin">· dates indicatives</small>' : ''}<br><small>${new Date(e.startMs).toLocaleDateString('fr-FR')} → ${new Date(e.endMs).toLocaleDateString('fr-FR')} · <b>${dayWord(e.startMs)}</b></small></div><button class="ghost sm" data-evdel="${esc(e.id)}">Retirer</button></div>`).join('')}</div>` : '<p class="mut small">Aucun événement à venir.</p>'}<div style="margin-top:8px"><button class="ghost sm" id="evadd">➕ Ajouter un événement</button></div></details>`;
+  box.querySelectorAll('details[data-sec]').forEach((d) => { d.ontoggle = () => { prefs[d.dataset.sec + 'Open'] = d.open; savePrefs(); }; });
   $('#goalgo').onclick = safe(async () => { prefs.goal = Number($('#goalin').value); savePrefs(); await showGoal(prefs.goal); });
   if (prefs.goal && prefs.goal > lvl) showGoal(prefs.goal).catch(() => {});
 }
@@ -200,16 +210,29 @@ $('#pbody').addEventListener('click', safe(async (e) => {
 async function drawDeals() {
   const box = $('#dbody'); box.innerHTML = '<p class="mut">Calcul…</p>';
   try {
-    const d = await api('/api/deals'), cv = d.creditValue;
-    box.innerHTML = `${cv ? `<p class="mut small">1 crédit = ${money(cv)} (réglable dans ⚙ Réglages).</p>` : '<p class="mut small">💡 Indique la valeur d\'un crédit dans ⚙ Réglages pour voir le gain net et quelle voie est la moins chère.</p>'}
-    <h3 style="margin:10px 0 8px">Cartes à acheter sur le marché pour les revendre au bot</h3>
-    ${d.cards.length ? `<table class="cards"><tr><th>Carte</th><th>Jeu</th><th>Prix marché</th><th>Le bot donne</th><th>Crédits / ${st.currency === 3 ? '€' : st.currency === 2 ? '£' : '$'}</th>${cv ? '<th>Gain net</th>' : ''}</tr>${d.cards.map((c) => `<tr><td><img src="${esc(c.img)}" alt="" loading="lazy"> ${esc(c.name)}</td><td>${esc(c.game)}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.worth} cr</td><td><b>${c.ratio}</b></td>${cv ? `<td class="${c.net > 0 ? 'ok' : 'mut'}">${c.net > 0 ? '+' : ''}${money(c.net)}</td>` : ''}</tr>`).join('')}</table>` : '<div class="sbox">Pas encore de données : lance « Cartes & sets » et « Bot (SCE) ».</div>'}
-    <h3 style="margin:22px 0 8px">Compléter un set : marché Steam ou bot ?</h3>
-    ${d.sets.length ? `<table class="cards"><tr><th>Jeu</th><th>Manquantes</th><th>Marché Steam</th><th>Chez le bot</th>${cv ? '<th>Le moins cher</th>' : ''}</tr>${d.sets.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.missing}</td><td>${money(x.market)}</td><td>${x.bot} cr${cv ? ` (≈ ${money(x.botEuro)})` : ''}</td>${cv ? `<td>${x.cheaper === 'bot' ? '🤖 bot' : '🛒 marché'}</td>` : ''}</tr>`).join('')}</table>` : '<div class="sbox">Lance « ✅ Vérifier les jeux » : l\'app compare alors les sets que le bot peut compléter en entier.</div>'}
-    <div id="spare"></div><div id="rare"></div>`;
+    const d = await api('/api/deals'), cv = d.creditValue, cur = st.currency === 3 ? '€' : st.currency === 2 ? '£' : '$';
+    const real = st.sets.filter((x) => !x.provisional && x.cost != null && (x.badgeLevel || 0) < 5);
+    const ready = real.filter((x) => x.cost === 0 && x.missingCount === 0), near = real.filter((x) => x.missingCount > 0 && x.missingCount <= 2).sort((a, b) => a.cost - b.cost).slice(0, 12);
+    const bot = d.sets.filter((x) => x.cheaper === 'bot').length;
+    const sec = (id, title, why, inner, open) => `<details class="cbox sec2" data-sec="${id}" ${open ? 'open' : ''}><summary><h4 style="display:inline">${title}</h4> <small class="mut">— ${why}</small></summary><div style="margin-top:8px">${inner}</div></details>`;
+    box.innerHTML = `<div class="cbox" style="margin-bottom:12px"><h4 style="margin:0 0 6px">💡 À quoi servent les bons plans ?</h4>
+      <p class="small" style="margin:0 0 6px">Chaque badge terminé = <b>+100 XP</b>. Cette page te montre <b>où dépenser le moins</b> pour en terminer le plus, dans cet ordre :</p>
+      <ol class="small" style="margin:0 0 4px 18px;padding:0"><li><b>Badges prêts à crafter</b> : tu as déjà toutes les cartes (0 €).</li><li><b>Badges presque finis</b> : 1 ou 2 cartes à acheter ou échanger.</li><li><b>Mes doublons → crédits</b> : ce que tes cartes en trop rapportent au bot, pour payer les cartes qui te manquent.</li><li><b>Marché Steam ou bot ?</b> : pour finir un set, quelle voie coûte le moins.</li><li><b>Acheter pour revendre</b> et <b>badges rares</b> : pour les joueurs qui optimisent.</li></ol></div>
+      <div class="kpis"><div class="stat"><b>${ready.length}</b><small>badge(s) prêt(s) à crafter</small></div><div class="stat"><b>${near.length}</b><small>badge(s) à 1-2 cartes de la fin</small></div><div class="stat"><b>${d.sets.length}</b><small>set(s) que le bot peut compléter${bot ? ` (${bot} moins cher chez lui)` : ''}</small></div></div>
+      ${sec('ready', '🔨 Badges prêts à crafter', `+100 XP chacun, 0 ${cur}`, ready.length ? `<div class="flist">${ready.map((x) => `<div class="frow"><img src="${esc(x.banner)}" alt="" style="width:90px;height:42px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'"><div class="grow"><b>${esc(x.name)}</b><br><small class="mut">toutes les cartes sont là</small></div><a class="ghost sm" href="${esc(st.profile.url.replace(/\/$/, ''))}/gamecards/${x.appid}/" target="_blank" rel="noopener">🔨 Crafter sur Steam</a></div>`).join('')}</div>` : '<p class="mut small">Aucun badge prêt pour le moment.</p>', true)}
+      ${sec('near', '⚡ Badges presque finis', 'les plus rapides à terminer', near.length ? `<div class="flist">${near.map((x) => `<div class="frow"><img src="${esc(x.banner)}" alt="" style="width:90px;height:42px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'"><div class="grow"><b>${esc(x.name)}</b><br><small class="mut">${x.missingCount} carte(s) manquante(s) · ≈ ${money(x.cost)}${x.friendsHave ? ` · 👥 ${x.friendsHave} chez des amis` : ''}${x.botHas ? ` · 🤖 ${x.botHas} chez le bot` : ''}</small></div><button class="ghost sm" data-dealbk="${x.appid}">🛒 Panier</button><button class="ghost sm" data-dealdet="${x.appid}">🔎 Détail</button></div>`).join('')}</div>` : '<p class="mut small">Aucun set à 1-2 cartes de la fin.</p>', true)}
+      <div id="spare"></div>
+      ${sec('compare', '🛒 Marché Steam ou bot ?', 'pour finir un set, quelle voie est la moins chère' + (cv ? '' : ' (indique la valeur d\'un crédit dans ⚙ Réglages)'), d.sets.length ? `<table class="cards"><tr><th>Jeu</th><th>Manquantes</th><th>Marché Steam</th><th>Chez le bot</th>${cv ? '<th>Le moins cher</th>' : ''}</tr>${d.sets.map((x) => `<tr><td>${esc(x.name)}</td><td>${x.missing}</td><td>${money(x.market)}</td><td>${x.bot} cr${cv ? ` (≈ ${money(x.botEuro)})` : ''}</td>${cv ? `<td>${x.cheaper === 'bot' ? '🤖 bot' : '🛒 marché'}</td>` : ''}</tr>`).join('')}</table>` : '<p class="mut small">Lance le « 🤖 MODE AUTO » : l\'app compare alors les sets que le bot peut compléter en entier.</p>', false)}
+      ${sec('resell', '📈 Acheter sur le marché pour revendre au bot', 'astuce avancée : gagner des crédits', `<p class="mut small">Le bot rachète chaque carte un nombre fixe de crédits. Si une carte coûte très peu sur le marché Steam, tu peux l'acheter et la lui revendre pour gagner des crédits (colonne « crédits par ${cur} » : plus c'est haut, mieux c'est). ${cv ? `1 crédit = ${money(cv)}.` : 'Renseigne la valeur d\'un crédit dans ⚙ Réglages pour voir le gain net.'}</p>${d.cards.length ? `<table class="cards"><tr><th>Carte</th><th>Jeu</th><th>Prix marché</th><th>Le bot donne</th><th>Crédits / ${cur}</th>${cv ? '<th>Gain net</th>' : ''}</tr>${d.cards.map((c) => `<tr><td><img src="${esc(c.img)}" alt="" loading="lazy"> ${esc(c.name)}</td><td>${esc(c.game)}</td><td>${esc(c.priceText || money(c.price))}</td><td>${c.worth} cr</td><td><b>${c.ratio}</b></td>${cv ? `<td class="${c.net > 0 ? 'ok' : 'mut'}">${c.net > 0 ? '+' : ''}${money(c.net)}</td>` : ''}</tr>`).join('')}</table>` : '<p class="mut small">Pas encore de données : lance « Cartes & sets » et « Bot (SCE) ».</p>'}`, false)}
+      <div id="rare"></div>`;
+    box.querySelectorAll('details[data-sec]').forEach((x) => { x.ontoggle = () => { prefs[x.dataset.sec + 'Open'] = x.open; savePrefs(); }; });
     drawSpare(); drawRare();
   } catch (e) { box.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
 }
+$('#dbody').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-dealbk]'); if (b) { const s2 = st.sets.find((x) => x.appid == b.dataset.dealbk); toggleCards(s2.cards.filter((c) => !c.owned && !c.unknown).map((c) => c.hash), true, false); lastSig = ''; return toast('🛒 Cartes manquantes ajoutées au panier'); }
+  const t = e.target.closest('[data-dealdet]'); if (t) openDetail(Number(t.dataset.dealdet));
+});
 async function drawSpare() {
   const box = $('#spare'); if (!box) return;
   try {
@@ -228,37 +251,127 @@ async function drawRare() {
   } catch (e) { box.innerHTML = `<h3 style="margin:22px 0 8px">💎 Badges rares à viser</h3><div class="sbox">${esc(e.message)}</div>`; }
 }
 $('#dreload').onclick = () => drawDeals();
-// ---------- amis : qui a besoin de mes doubles (un menu déroulant par ami, tuiles comme la page des badges) ----------
+// ---------- amis : un menu déroulant par ami (tuiles comme la page des badges), infos cliquables, profil, composition d'échange ----------
 let fSig = '', FR = [];
-const fcard = (c) => `<span class="fc2 ${c.canGive ? 'give' : c.iNeed ? 'need' : c.friendHas ? 'has' : 'lack'}" title="${esc(c.name)} — ${c.canGive ? 'tu peux la lui donner' : c.iNeed ? 'il l\'a et elle te manque' : c.friendHas ? 'il l\'a déjà' : 'il ne l\'a pas'}"><img loading="lazy" src="${esc(c.img)}" alt="${esc(c.name)}"></span>`;
+const fcard = (c) => { const need = c.iNeed && (!prefs.fdup || c.iNeedDup); return `<span class="fc2 ${c.canGive ? 'give' : need ? 'need' : c.friendHas ? 'has' : 'lack'}" title="${esc(c.name)} — ${c.canGive ? 'tu peux la lui donner' : need ? 'il l\'a' + (c.iNeedDup ? ' en double' : '') + ' et elle te manque' : c.friendHas ? 'il l\'a déjà' : 'il ne l\'a pas'}"><img loading="lazy" src="${esc(c.img)}" alt="${esc(c.name)}"></span>`; };
+const needList = (g) => (prefs.fdup ? g.iNeed.filter((c) => c.dup) : g.iNeed);
 async function drawFriends() {
   const box = $('#fbody');
   try {
-    const d = await api('/api/friends/needs'), sig = JSON.stringify([d, st.friends.status]); if (sig === fSig) return; fSig = sig; $('#fdiag')._d = d.diag; FR = d.friends;
+    const d = await api('/api/friends/needs'), sig = JSON.stringify([d, st.friends.status, prefs.fdup]); if (sig === fSig) return; fSig = sig; $('#fdiag')._d = d.diag; FR = d.friends;
     const open = new Set([...box.querySelectorAll('details[open]')].map((x) => x.dataset.f));
-    const head = `<p class="mut small">${d.hasAll ? `${d.total} ami(s) · ${friendsInfo()}${d.age ? ' · lu ' + ago(d.age) : ''}` : 'Pas encore lu : clique sur « Lire les inventaires des amis ».'}${st.friends.status === 'loading' ? ' · ⏳ lecture en cours…' : ''}</p>
+    const head = `<div class="row" style="justify-content:space-between;gap:10px;flex-wrap:wrap"><p class="mut small">${d.hasAll ? `${d.total} ami(s) · ${friendsInfo()}${d.age ? ' · lu ' + ago(d.age) : ''}` : 'Pas encore lu : clique sur « Lire les inventaires des amis ».'}${st.friends.status === 'loading' ? ' · ⏳ lecture en cours…' : ''}</p>
+      <label class="check" title="Affiche seulement les cartes qu'il a en double (celles qu'il peut te céder sans rien perdre)"><input type="checkbox" id="fdup" ${prefs.fdup ? 'checked' : ''}> 🔁 Seulement les cartes qu'il a en <b>double</b></label></div>
       <div class="legend"><span class="lg give">🎁 tu peux la lui donner</span><span class="lg need">⭐ il l'a et elle te manque</span><span class="lg has">il l'a déjà</span><span class="lg lack">il ne l'a pas</span></div>`;
     if (!d.hasAll) { box.innerHTML = head + '<div class="sbox">Clique sur « Lire les inventaires des amis » : l\'app regarde leurs cartes pour trouver ceux à qui tes doublons permettent de finir un badge. Si leurs inventaires sont privés, ils n\'apparaîtront pas (le diagnostic dit pourquoi).</div>'; return; }
-    box.innerHTML = head + (d.friends.length ? d.friends.map((f, i) => `<details class="fdet cbox sec2" data-f="${esc(f.steamid)}" ${open.has(f.steamid) || (!open.size && i === 0) ? 'open' : ''}>
-      <summary><img src="${esc(f.avatar || '')}" alt="" class="fav"><b>${esc(f.name)}</b> <span class="chip cbot">🎁 ${f.giveCount} à donner</span>${f.games.reduce((t, g) => t + g.iNeed.length, 0) ? ` <span class="chip cfr">⭐ ${f.games.reduce((t, g) => t + g.iNeed.length, 0)} pour toi</span>` : ''}${f.completes ? ` <span class="chip" style="border-color:var(--ok)">✔ ${f.completes} badge(s) à finir</span>` : ''}<small class="mut"> · ${f.games.length} jeu(x)</small></summary>
-      <div class="grid fgrid">${f.games.map((g) => `<article class="set ${g.completes && g.canGive.length ? 'finish' : ''}"><img class="banner" data-n="${esc(g.name)}" src="${esc(g.banner)}" alt="" loading="lazy" onerror="fb(this)">
+    box.innerHTML = head + (d.friends.length ? d.friends.map((f, i) => { const need = f.games.reduce((t, g) => t + needList(g).length, 0), id = esc(f.steamid);
+      return `<details class="fdet cbox sec2" data-f="${id}" ${open.has(f.steamid) || (!open.size && i === 0) ? 'open' : ''}>
+      <summary><img src="${esc(f.avatar || '')}" alt="" class="fav"><a href="#" class="lnk" data-fprof="${id}" title="Voir son profil"><b>${esc(f.name)}</b></a>
+        <button class="chip cbot" data-finfo="${id}|give">🎁 ${f.giveCount} à donner</button>${need ? `<button class="chip cfr" data-finfo="${id}|need">⭐ ${need} pour toi${prefs.fdup ? ' (doubles)' : ''}</button>` : ''}${f.completes ? `<button class="chip" style="border-color:var(--ok)" data-finfo="${id}|finish">✔ ${f.completes} badge(s) à finir</button>` : ''}<button class="chip" data-finfo="${id}|games">🎮 ${f.games.length} jeu(x)</button></summary>
+      <div class="grid fgrid">${f.games.map((g) => { const nl = needList(g); return `<article class="set ${g.completes && g.canGive.length ? 'finish' : ''}"><img class="banner" data-n="${esc(g.name)}" src="${esc(g.banner)}" alt="" loading="lazy" onerror="fb(this)">
         <div class="body"><header><h3>${esc(g.name)}</h3><span class="pill">${g.level ? 'Niv. ' + g.level : 'Nouveau badge'}</span></header>
         <div class="fan">${g.cards.map(fcard).join('')}</div>
-        <div class="cnt"><span class="c miss">il lui manque ${g.need}</span><span class="c bot">🎁 ${g.canGive.length}</span><span class="c fr">⭐ ${g.iNeed.length}</span>${g.completes && g.canGive.length ? '<span class="c" style="border-color:var(--ok)">✔ finit son set</span>' : ''}</div>
+        <div class="cnt"><span class="c miss">il lui manque ${g.need}</span><span class="c bot">🎁 ${g.canGive.length}</span><span class="c fr">⭐ ${nl.length}</span>${g.completes && g.canGive.length ? '<span class="c" style="border-color:var(--ok)">✔ finit son set</span>' : ''}</div>
         <div class="row"><span>${g.has}/${g.total} cartes chez lui</span></div>
-        <button class="cta" data-foffer="${esc(f.steamid)}|${g.appid}">📨 Proposer l'échange (${Math.min(6, g.canGive.length)} contre ${Math.min(6, g.iNeed.length)})</button></div></article>`).join('')}</div>
-      <div class="row" style="margin-top:8px;justify-content:flex-start"><a class="ghost sm" href="${esc(tradeUrl(f.steamid))}" target="_blank" rel="noopener">⇄ Page d'échange Steam avec ${esc(f.name)}</a></div></details>`).join('')
+        <button class="cta" data-foffer="${id}|${g.appid}">📨 Composer l'échange (${Math.min(6, g.canGive.length)} contre ${Math.min(6, nl.length)})</button></div></article>`; }).join('')}</div></details>`; }).join('')
       : '<div class="sbox">Aucun ami n\'a besoin de tes doublons pour le moment (ou ils ont un inventaire privé : copie le diagnostic pour voir).</div>');
   } catch (e) { box.innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
 }
+$('#fbody').addEventListener('change', (e) => { if (e.target.id === 'fdup') { prefs.fdup = e.target.checked; savePrefs(); fSig = ''; drawFriends(); } });
+// infos cliquables : le détail s'affiche dans une fenêtre
+function showFriendInfo(sid, kind) {
+  const f = FR.find((x) => x.steamid === sid); if (!f) return;
+  const chips = (l) => `<div class="tc">${l.map((c) => `<span class="tcard" title="${esc(c.name)}"><img src="${esc(c.img)}" alt=""><small>${esc(c.name)}${c.dup ? ' ×2+' : ''}</small></span>`).join('')}</div>`;
+  const body = {
+    give: () => f.games.filter((g) => g.canGive.length).map((g) => `<div class="agame"><b>${esc(g.name)}</b> <small class="mut">il lui manque ${g.need} carte(s)</small>${chips(g.canGive)}</div>`).join('') || '<p class="mut">Rien à lui donner.</p>',
+    need: () => f.games.filter((g) => needList(g).length).map((g) => `<div class="agame"><b>${esc(g.name)}</b>${chips(needList(g))}</div>`).join('') || '<p class="mut">Il n\'a aucune carte qui te manque' + (prefs.fdup ? ' en double' : '') + '.</p>',
+    finish: () => f.games.filter((g) => g.completes && g.canGive.length).map((g) => `<div class="agame"><b>${esc(g.name)}</b> <small class="ok">tes ${g.canGive.length} carte(s) complètent son set</small>${chips(g.canGive)}</div>`).join(''),
+    games: () => f.games.map((g) => `<div class="frow"><img src="${esc(g.banner)}" alt="" style="width:90px;height:42px;object-fit:cover;border-radius:8px" onerror="this.style.display='none'"><div class="grow"><b>${esc(g.name)}</b><br><small class="mut">il a ${g.has}/${g.total} cartes · 🎁 ${g.canGive.length} à donner · ⭐ ${needList(g).length} pour toi</small></div></div>`).join('') }[kind]();
+  $('#fit').textContent = `${f.name} — ${{ give: '🎁 cartes que tu peux lui donner', need: '⭐ cartes qu\'il a pour toi', finish: '✔ badges que tu peux l\'aider à finir', games: '🎮 jeux concernés' }[kind]}`;
+  $('#fibody').innerHTML = body; $('#fidlg').showModal();
+}
+// composition d'un échange favorable à l'ami : tu choisis les cartes des deux côtés (6 au maximum)
+const PC = { data: null, give: new Set(), take: new Set(), gfilter: 'needed', gq: '' };
+async function composeFriend(sid, appid) {
+  PC.data = await api('/api/friends/compose/' + sid); PC.sid = sid; PC.gq = ''; PC.gfilter = 'needed';
+  const take = PC.data.take.filter((c) => (!appid || c.appid == appid) && (!prefs.fdup || c.dup)).slice(0, 6);
+  PC.take = new Set(take.map((c) => String(c.assetid)));
+  const target = take.reduce((t, c) => t + (c.price || 0), 0); let sum = 0; PC.give = new Set();
+  for (const c of PC.data.give) { if (PC.give.size >= 6) break; if (!c.needed && !c.spare) continue; if (PC.give.size >= take.length && sum >= target) break; PC.give.add(String(c.assetid)); sum += c.price || 0; }
+  renderCompose(); $('#pdlg').showModal();
+}
+const pcGive = () => { const q = PC.gq.toLowerCase(); let l = PC.data.give.filter((c) => !q || (c.name + ' ' + c.game).toLowerCase().includes(q)); if (PC.gfilter === 'needed') l = l.filter((c) => c.needed || PC.give.has(String(c.assetid))); else if (PC.gfilter === 'spare') l = l.filter((c) => c.spare || PC.give.has(String(c.assetid))); return l; };
+const pcVal = (set, list) => list.filter((c) => set.has(String(c.assetid))).reduce((t, c) => t + (c.price || 0), 0);
+function renderCompose() {
+  const d = PC.data, gv = pcVal(PC.give, d.give), tv = pcVal(PC.take, d.take), fav = gv >= tv;
+  const row = (c, set, key, extra) => `<label class="arow ${set.has(String(c.assetid)) ? 'sel' : ''}"><input type="checkbox" data-${key}="${esc(String(c.assetid))}" ${set.has(String(c.assetid)) ? 'checked' : ''}><img src="${esc(c.img)}" alt=""><div class="grow"><b>${esc(c.name)}</b> <small class="mut">${esc(c.price ? money(c.price) : '')}</small><br><small class="mut">${esc(c.game || '')}</small>${extra}</div></label>`;
+  $('#pdt').textContent = `Composer l'échange avec ${d.friend.name}`;
+  $('#pbody2').innerHTML = `<p class="mut small">Choisis les cartes des deux côtés (6 au maximum chacun). Pour que ce soit <b>favorable à ${esc(d.friend.name)}</b>, donne des cartes dont il a besoin (de ce jeu ou d'un autre) pour une valeur au moins égale à ce que tu prends.</p>
+    <div class="cfsum" id="pcsum">${fav ? `<b class="ok">✔ Favorable à ${esc(d.friend.name)}</b>` : `<b style="color:var(--warn)">⚠ Plutôt favorable à toi</b> : ajoute des cartes de ton côté`} · tu donnes ≈ ${money(gv)} (${PC.give.size}/6) · tu prends ≈ ${money(tv)} (${PC.take.size}/6)</div>
+    <div class="agrid"><div class="cbox"><h4>🎁 Je donne</h4><div class="atool"><div class="search"><input id="pgq" placeholder="🔎 Chercher dans mon inventaire…" value="${esc(PC.gq)}"><button class="qx" data-clear="pgq" ${PC.gq ? '' : 'hidden'} aria-label="Effacer">✕</button></div>
+      <select id="pgf"><option value="needed" ${PC.gfilter === 'needed' ? 'selected' : ''}>Cartes dont il a besoin</option><option value="spare" ${PC.gfilter === 'spare' ? 'selected' : ''}>Mes doublons</option><option value="all" ${PC.gfilter === 'all' ? 'selected' : ''}>Toutes mes cartes</option></select></div>
+      <div class="alist" id="pglist">${pcGive().map((c) => row(c, PC.give, 'pg', c.needed ? ' <span class="chip cbot">🎁 il en a besoin</span>' : c.spare ? ' <span class="chip">double</span>' : '')).join('') || '<p class="mut small">Aucune carte ne correspond.</p>'}</div></div>
+      <div class="cbox"><h4>⭐ Je prends <small class="mut">— ses cartes qui me manquent</small></h4><div class="alist" id="ptlist">${d.take.filter((c) => !prefs.fdup || c.dup || PC.take.has(String(c.assetid))).map((c) => row(c, PC.take, 'pt', c.dup ? ' <span class="chip cfr">en double chez lui</span>' : '')).join('') || '<p class="mut small">Il n\'a aucune carte qui te manque.</p>'}</div></div></div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><button class="ghost" id="pcno">Annuler</button><button class="go" id="pcgo" style="width:auto;padding:12px 24px;margin:0" ${PC.give.size || PC.take.size ? '' : 'disabled'}>👁 Continuer : vérifier et valider…</button></div>`;
+}
+$('#pbody2').addEventListener('input', (e) => { if (e.target.id === 'pgq') { PC.gq = e.target.value; const b = $('#pbody2').querySelector('[data-clear=pgq]'); if (b) b.hidden = !PC.gq; $('#pglist').innerHTML = pcGive().map((c) => `<label class="arow ${PC.give.has(String(c.assetid)) ? 'sel' : ''}"><input type="checkbox" data-pg="${esc(String(c.assetid))}" ${PC.give.has(String(c.assetid)) ? 'checked' : ''}><img src="${esc(c.img)}" alt=""><div class="grow"><b>${esc(c.name)}</b> <small class="mut">${esc(c.price ? money(c.price) : '')}</small><br><small class="mut">${esc(c.game || '')}</small>${c.needed ? ' <span class="chip cbot">🎁 il en a besoin</span>' : c.spare ? ' <span class="chip">double</span>' : ''}</div></label>`).join('') || '<p class="mut small">Aucune carte ne correspond.</p>'; } });
+$('#pbody2').addEventListener('change', (e) => {
+  if (e.target.id === 'pgf') { PC.gfilter = e.target.value; return renderCompose(); }
+  const g = e.target.dataset.pg, t = e.target.dataset.pt;
+  if (g !== undefined) { if (e.target.checked && PC.give.size >= 6) { e.target.checked = false; return toast('6 cartes maximum de chaque côté.', true); } e.target.checked ? PC.give.add(g) : PC.give.delete(g); }
+  if (t !== undefined) { if (e.target.checked && PC.take.size >= 6) { e.target.checked = false; return toast('6 cartes maximum de chaque côté.', true); } e.target.checked ? PC.take.add(t) : PC.take.delete(t); }
+  if (g !== undefined || t !== undefined) { const keep = PC.gq; renderCompose(); PC.gq = keep; }
+});
+$('#pbody2').addEventListener('click', (e) => {
+  if (e.target.id === 'pcno') return $('#pdlg').close();
+  if (e.target.id !== 'pcgo') return;
+  const d = PC.data, gives = d.give.filter((c) => PC.give.has(String(c.assetid))), asks = d.take.filter((c) => PC.take.has(String(c.assetid))), gv = pcVal(PC.give, d.give), tv = pcVal(PC.take, d.take);
+  $('#pdlg').close();
+  confirmTrade({ title: `Échange avec ${d.friend.name}`, window: true, who: `👥 ${d.friend.name}`, asks, gives, validateLabel: 'Valider et ouvrir la fenêtre d\'échange Steam',
+    summary: `Tu donnes ≈ ${money(gv)}, tu prends ≈ ${money(tv)}. ${gv >= tv ? '✔ Favorable à ' + esc(d.friend.name) + '.' : '⚠ Plutôt favorable à toi.'}`, warn: !asks.length ? 'Tu ne prends rien : ce sera un cadeau.' : '' },
+  () => openSteamWindow({ source: 'friend', friendId: PC.sid, give: gives.map((c) => ({ assetid: c.assetid, name: c.name, appid: c.appid })), ask: asks.map((c) => ({ assetid: c.assetid, hash: c.hash, name: c.name, appid: c.appid })) }),
+  { label: '📨 Envoyer directement l\'offre', run: () => sendFriendOffer(PC.sid, gives.map((c) => c.assetid), asks.map((c) => c.assetid)) });
+});
+// ---------- profil d'un ami : Progrès · Sets · Boosters · Souhaits & échanges ----------
+const FP = { id: null, data: null, tab: 'prog', q: '', sort: 'level' };
+async function openFriendProfile(sid) {
+  FP.id = sid; FP.tab = 'prog'; FP.q = ''; view = 'fprofile'; showView();
+  $('#fpbody').innerHTML = '<p class="mut">Chargement…</p>';
+  try { FP.data = await api('/api/friends/profile/' + sid); $('#fpname').textContent = FP.data.name; drawFriendProfile(); } catch (e) { $('#fpbody').innerHTML = `<div class="errbox">${esc(e.message)}</div>`; }
+}
+function drawFriendProfile() {
+  const d = FP.data; if (!d) return;
+  document.querySelectorAll('#fptabs button').forEach((b) => b.classList.toggle('on', b.dataset.p === FP.tab));
+  const vs = (a, b) => `<div class="stat"><b>${a ?? '–'} <small class="mut">/ ${b ?? '–'}</small></b></div>`, box = $('#fpbody');
+  if (FP.tab === 'prog') {
+    const cmp = (label, his, mine) => `<div class="stat"><b>${nf(his ?? 0)} <small class="mut">toi : ${nf(mine ?? 0)}</small></b><small>${label}</small></div>`;
+    box.innerHTML = `<div class="row" style="justify-content:flex-start;gap:12px;align-items:center;margin-bottom:10px"><img src="${esc(d.avatar || '')}" alt="" style="width:64px;height:64px;border-radius:16px"><div><h3 style="margin:0">${esc(d.name)}</h3><small class="mut">niveau ${d.level ?? '?'}${d.rareCount != null ? ' · ' + d.rareCount + ' badges rares' : ''}</small></div></div>
+      <div class="kpis">${cmp('niveau', d.level, d.me.level)}${cmp('badges', d.badgeCount, d.me.badgeCount)}${cmp('rareté', d.rarity, d.me.rarity)}${cmp('cartes', d.counts && d.counts.cards, d.me.cards)}${cmp('boosters', d.counts && d.counts.boosters, d.me.boosters)}${cmp('XP', d.xp, null)}</div>
+      ${d.level == null ? '<div class="sbox">Lance « Analyser mes amis » (onglet Classement) pour voir son niveau et ses badges.</div>' : ''}
+      ${!d.counts ? '<div class="sbox">Lance « 👥 Amis » (menu) pour compter ses cartes et ses boosters.</div>' : ''}`;
+  } else if (FP.tab === 'sets') {
+    const q = FP.q.toLowerCase(); let l = d.badges.filter((b) => !q || b.name.toLowerCase().includes(q));
+    const by = { level: (a, b) => b.level - a.level, rare: (a, b) => (b.points || 0) - (a.points || 0), name: (a, b) => a.name.localeCompare(b.name), missing: (a, b) => (b.mineLevel === 0) - (a.mineLevel === 0) }[FP.sort]; l = l.sort(by);
+    box.innerHTML = d.hasBadges ? `<div class="tools" style="margin-bottom:10px"><div class="search"><input id="fpq" placeholder="Rechercher un jeu…" value="${esc(FP.q)}"><button class="qx" data-clear="fpq" ${FP.q ? '' : 'hidden'} aria-label="Effacer">✕</button></div><label class="selbox">↕ <select id="fps"><option value="level">Niveau (haut)</option><option value="rare">Les plus rares</option><option value="missing">Ceux que je n'ai pas</option><option value="name">A → Z</option></select></label></div>
+      <p class="mut small">${d.badges.length} badge(s)</p><div class="grid">${l.map((b) => `<article class="set done"><img class="banner" data-n="${esc(b.name)}" src="${esc(b.banner)}" alt="" loading="lazy" onerror="fb(this)"><div class="body"><header><h3>${esc(b.name)}</h3><span class="pill ${b.level >= 5 ? 'ok' : ''}">Niveau ${b.level}</span></header>
+        <div class="cnt"><span class="c">toi : ${b.mineLevel ? 'niv. ' + b.mineLevel : 'pas de badge'}</span>${b.points != null ? `<span class="c" title="${nf(b.scarcity)} détenteurs">💎 ${b.points} pts</span>` : ''}</div></div></article>`).join('')}</div>` : '<div class="sbox">Lance « Analyser mes amis » (onglet Classement) pour lire ses badges.</div>';
+    $('#fps') && ($('#fps').value = FP.sort);
+  } else if (FP.tab === 'boosters') {
+    box.innerHTML = d.boosters.length ? `<div class="grid">${d.boosters.map((b) => `<article class="set"><div class="body"><header><h3>${esc(b.name)}</h3><span class="pill">× ${b.count}</span></header><div class="fan"><img src="${esc(b.img)}" alt="" style="width:76px;height:76px"></div></div></article>`).join('')}</div>` : `<div class="sbox">${d.counts ? 'Il n\'a aucun booster.' : 'Lance « 👥 Amis » (menu) pour lire ses boosters.'}</div>`;
+  } else {
+    box.innerHTML = d.games.length ? `<div class="grid fgrid">${d.games.map((g) => { const nl = needList(g); return `<article class="set ${g.completes && g.canGive.length ? 'finish' : ''}"><img class="banner" data-n="${esc(g.name)}" src="${esc(g.banner)}" alt="" loading="lazy" onerror="fb(this)"><div class="body"><header><h3>${esc(g.name)}</h3></header><div class="fan">${g.cards.map(fcard).join('')}</div>
+      <div class="cnt"><span class="c bot">🎁 ${g.canGive.length} à donner</span><span class="c fr">⭐ ${nl.length} pour toi</span></div><button class="cta" data-foffer="${esc(d.id)}|${g.appid}">📨 Composer l'échange</button></div></article>`; }).join('')}</div>` : '<div class="sbox">Aucun échange intéressant avec cet ami pour le moment.</div>';
+  }
+}
+$('#fptabs').onclick = (e) => { const b = e.target.closest('button[data-p]'); if (b) { FP.tab = b.dataset.p; drawFriendProfile(); } };
+$('#fpback').onclick = () => { view = prefs.view = 'friends'; savePrefs(); showView(); };
+$('#fpbody').addEventListener('input', (e) => { if (e.target.id === 'fpq') { FP.q = e.target.value; const c = $('#fpbody').querySelector('[data-clear=fpq]'); if (c) c.hidden = !FP.q; const pos = e.target.selectionStart; drawFriendProfile(); const n = $('#fpq'); n.focus(); n.setSelectionRange(pos, pos); } });
+$('#fpbody').addEventListener('change', (e) => { if (e.target.id === 'fps') { FP.sort = e.target.value; drawFriendProfile(); } });
+$('#fpbody').addEventListener('click', (e) => { const o = e.target.closest('[data-foffer]'); if (o) { const [sid, appid] = o.dataset.foffer.split('|'); composeFriend(sid, appid).catch((err) => toast(err.message, true)); } });
 $('#fbody').addEventListener('click', safe(async (e) => {
-  const o = e.target.closest('[data-foffer]'); if (!o) return;
-  const [sid, appid] = o.dataset.foffer.split('|'), f = FR.find((x) => x.steamid === sid), g = f && f.games.find((x) => x.appid == appid); if (!g) return;
-  const give = g.canGive.slice(0, 6), ask = g.iNeed.slice(0, 6); // 6 cartes maximum de chaque côté
-  if (!give.length && !ask.length) return toast('Rien à échanger pour ce jeu.', true);
-  confirmTrade({ title: `Offre à ${f.name}`, who: `👥 ${f.name} — ${g.name}`, asks: ask.map((c) => ({ ...c, game: g.name })), gives: give.map((c) => ({ ...c, game: g.name })), validateLabel: 'Valider et envoyer l\'offre',
-    summary: ask.length ? 'Échange carte contre carte.' : 'Il n\'a aucune carte qui te manque : tu lui <b>offres</b> ces cartes sans rien recevoir.', warn: !ask.length ? 'Ce sera un cadeau : tu ne reçois rien en échange.' : '' },
-  () => sendFriendOffer(sid, give.map((c) => c.assetid), ask.map((c) => c.assetid)));
+  const p = e.target.closest('[data-fprof]'); if (p) { e.preventDefault(); return openFriendProfile(p.dataset.fprof); }
+  const i = e.target.closest('[data-finfo]'); if (i) { e.preventDefault(); const [sid, k] = i.dataset.finfo.split('|'); return showFriendInfo(sid, k); }
+  const o = e.target.closest('[data-foffer]'); if (o) { const [sid, appid] = o.dataset.foffer.split('|'); await composeFriend(sid, appid); }
 }));
 $('#fscan').onclick = safe(async () => { await api('/api/scan/friends', {}); fSig = ''; poll(); });
 $('#fdiag').onclick = safe(async () => { const d = $('#fdiag')._d || (await api('/api/friends/needs')).diag; try { await navigator.clipboard.writeText(d); toast('Diagnostic des amis copié'); } catch { prompt('Copie ce diagnostic :', d); } });
@@ -285,18 +398,31 @@ function dropsReminder() {
 }
 // ---------- page de confirmation : aucune offre ni ouverture de fenêtre d'échange sans que tu aies relu et cliqué sur « Valider » ----------
 const cfCards = (l, k) => l.length ? l.map((c) => `<span class="tcard" title="${esc(c.name)} — ${esc(c.game || '')}"><img src="${esc(c.img)}" alt=""><small>${esc(c.name)}</small><small>${k === 'ask' ? (c.price != null ? esc(c.unit === 'cr' ? c.price + ' cr' : money(c.price)) : '') : (c.worth != null ? esc(c.unit === 'cr' ? c.worth + ' cr' : money(c.worth)) : '')}</small></span>`).join('') : '<small class="mut">rien</small>';
-// t : { title, who, asks, gives, summary, validateLabel, warn } ; onValidate() n'est appelé qu'après ton clic
-function confirmTrade(t, onValidate) {
+// t : { title, who, asks, gives, summary, validateLabel, warn } ; onValidate() n'est appelé qu'après ton clic ; alt : { label, run } = seconde façon de valider
+function confirmTrade(t, onValidate, alt) {
   $('#cft').textContent = t.title || 'Vérifie et valide l\'échange';
-  $('#cfbody').innerHTML = `<p class="mut small">Relis le détail : <b>rien n'est envoyé ni acheté tant que tu n'as pas cliqué sur « ${esc(t.validateLabel || 'Valider')} »</b>.</p>
+  $('#cfbody').innerHTML = `<p class="mut small">Relis le détail : <b>rien n'est envoyé ni acheté tant que tu n'as pas cliqué sur un bouton de validation</b>. ${t.window ? 'La fenêtre d\'échange Steam s\'ouvre avec les cartes déjà placées : tu n\'as plus qu\'à cliquer sur « Faire l\'offre ».' : ''}</p>
     <div class="cfsum"><b>${esc(t.who || '')}</b><br>${t.summary || ''}</div>
     <div class="cfgrid"><div class="cfcol"><h4>Je prends (${t.asks.length})</h4><div class="tc">${cfCards(t.asks.map((c) => ({ ...c, unit: t.unit })), 'ask')}</div></div>
       <div class="cfcol"><h4>Je donne (${t.gives.length})</h4><div class="tc">${cfCards(t.gives.map((c) => ({ ...c, unit: t.unit })), 'give')}</div></div></div>
     ${t.warn ? `<p class="note">⚠ ${esc(t.warn)}</p>` : ''}
-    <div class="row" style="justify-content:flex-end;gap:8px"><button class="ghost" id="cfno">Annuler</button><button class="go" id="cfok" style="width:auto;padding:12px 26px;margin:0">✅ ${esc(t.validateLabel || 'Valider')}</button></div>`;
+    <div class="row" style="justify-content:flex-end;gap:8px;flex-wrap:wrap"><button class="ghost" id="cfno">Annuler</button>${alt ? `<button class="ghost" id="cfalt">${esc(alt.label)}</button>` : ''}<button class="go" id="cfok" style="width:auto;padding:12px 26px;margin:0">✅ ${esc(t.validateLabel || 'Valider')}</button></div>`;
+  const run = (fn) => async (e) => { const btns = $('#cfbody').querySelectorAll('button'); btns.forEach((x) => (x.disabled = true)); try { await fn(); $('#cfdlg').close(); } catch (err) { toast(err.message, true); btns.forEach((x) => (x.disabled = false)); } };
   $('#cfno').onclick = () => $('#cfdlg').close();
-  $('#cfok').onclick = async () => { $('#cfok').disabled = true; try { await onValidate(); $('#cfdlg').close(); } catch (e) { toast(e.message, true); $('#cfok').disabled = false; } };
+  $('#cfok').onclick = run(onValidate);
+  if (alt) $('#cfalt').onclick = run(alt.run);
   if (!$('#cfdlg').open) $('#cfdlg').showModal();
+}
+// fenêtre d'échange Steam (dans l'application) avec les cartes déjà placées ; il ne reste qu'à cliquer sur « Faire l'offre »
+async function openSteamWindow({ source, friendId, give, ask, tradeUrl: given }) {
+  let tradeUrl = given || '';
+  if (source === 'bot') {
+    const c = await api('/api/settings'); tradeUrl = c.BOT_TRADE_URL || '';
+    if (!tradeUrl) { tradeUrl = (prompt('Colle le lien d\'échange Steam du bot SteamCardExchange (https://steamcommunity.com/tradeoffer/new/?partner=…&token=…) :') || '').trim(); if (!tradeUrl) throw new Error('Lien d\'échange du bot manquant : rien n\'a été ouvert.'); await api('/api/settings', { BOT_TRADE_URL: tradeUrl }); }
+  }
+  const r = await api('/api/steamtrade/open', { source, friendId, tradeUrl, give, ask, confirmed: true });
+  if (!r.opened) window.open(r.url, '_blank');
+  toast('Fenêtre d\'échange Steam ouverte : vérifie les cartes puis clique sur « Faire l\'offre ».');
 }
 // envoi d'une offre Steam à un ami (après validation) puis ouverture de la page de l'offre dans l'application
 async function sendFriendOffer(friendId, give, ask) {
@@ -378,9 +504,9 @@ function renderAuto() {
       <div class="tc">${d.botDupes.slice(0, 60).map((x) => `<span class="tcard" title="${esc(x.name)} × ${x.count} — ${esc(x.game)}${x.checked ? '' : ' (pas vérifié)'}${x.over ? ' — surstock' : ''}"><img src="${esc(x.img)}" alt="" style="${x.checked ? '' : 'opacity:.45'}${x.over ? ';outline:2px solid var(--warn)' : ''}"><small>${x.worth} cr${x.count > 1 ? ' ×' + x.count : ''}</small></span>`).join('')}</div>` : '<p class="mut small">Aucun doublon.</p>'}</details>`;
   const modes = [['bot', '🤖 Trader avec le bot'], ['friends', '👥 Trader avec mes amis'], ['sell', '💰 Vendre mes cartes au bot']];
   const sel = (id, val, opts) => `<select id="${id}">${opts.map(([v, t]) => `<option value="${v}" ${v === val ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
-  const wantTools = A.mode === 'sell' ? '' : `<div class="atool"><input id="awq" placeholder="🔎 Chercher une carte voulue ou un jeu…" value="${esc(A.wq)}">${sel('awf', A.wfilter, [['all', 'Toutes'], ['completable', 'Sets complétables'], ['selected', 'Cochées'], ['unselected', 'Non cochées'], ['cheap', 'Pas chères (≤ 6 cr)']])}${sel('aws', A.wsort, [['game', 'Tri : jeu'], ['name', 'Tri : nom'], ['price', 'Tri : prix chez le bot'], ['market', 'Tri : prix marché'], ['set', 'Tri : set le moins cher']])}
+  const wantTools = A.mode === 'sell' ? '' : `<div class="atool"><div class="search"><input id="awq" placeholder="🔎 Chercher une carte voulue ou un jeu…" value="${esc(A.wq)}"><button class="qx" data-clear="awq" ${A.wq ? '' : 'hidden'} aria-label="Effacer">✕</button></div>${sel('awf', A.wfilter, [['all', 'Toutes'], ['completable', 'Sets complétables'], ['selected', 'Cochées'], ['unselected', 'Non cochées'], ['cheap', 'Pas chères (≤ 6 cr)']])}${sel('aws', A.wsort, [['game', 'Tri : jeu'], ['name', 'Tri : nom'], ['price', 'Tri : prix chez le bot'], ['market', 'Tri : prix marché'], ['set', 'Tri : set le moins cher']])}
     <button class="ghost sm" data-ax="wall">Tout cocher</button><button class="ghost sm" data-ax="wnone">Tout décocher</button></div>`;
-  const giveTools = `<div class="atool"><input id="agq" placeholder="🔎 Chercher dans mon inventaire…" value="${esc(A.gq)}">${sel('agf', A.gfilter, [['spare', 'Mes doublons'], ['all', 'Toutes mes cartes'], ['selected', 'Cochées'], ['valuable', 'Valeur ≥ 6 cr'], ['unchecked', 'Pas vérifiées chez le bot']])}${sel('ags', A.gsort, [['worth', 'Tri : rachat (haut)'], ['worthasc', 'Tri : rachat (bas)'], ['price', 'Tri : prix marché'], ['name', 'Tri : nom'], ['game', 'Tri : jeu']])}
+  const giveTools = `<div class="atool"><div class="search"><input id="agq" placeholder="🔎 Chercher dans mon inventaire…" value="${esc(A.gq)}"><button class="qx" data-clear="agq" ${A.gq ? '' : 'hidden'} aria-label="Effacer">✕</button></div>${sel('agf', A.gfilter, [['spare', 'Mes doublons'], ['all', 'Toutes mes cartes'], ['selected', 'Cochées'], ['valuable', 'Valeur ≥ 6 cr'], ['unchecked', 'Pas vérifiées chez le bot']])}${sel('ags', A.gsort, [['worth', 'Tri : rachat (haut)'], ['worthasc', 'Tri : rachat (bas)'], ['price', 'Tri : prix marché'], ['name', 'Tri : nom'], ['game', 'Tri : jeu']])}
     <button class="ghost sm" data-ax="gspare" title="Coche tous tes doublons">♻ Tous mes doubles</button><button class="ghost sm" data-ax="gvis">Cocher les visibles</button><button class="ghost sm" data-ax="gnone">Tout décocher</button></div>`;
   $('#abody').innerHTML = `<div id="ahead">${autoHead()}</div>${botBox}
     <div class="modebar">${modes.map(([k, t]) => `<button class="ghost ${A.mode === k ? 'on' : ''}" data-amode="${k}">${t}</button>`).join('')}</div>
@@ -418,21 +544,20 @@ $('#abody').addEventListener('change', (e) => {
   if (g !== undefined) { e.target.checked ? A.give.add(g) : A.give.delete(g); e.target.closest('.arow').classList.toggle('sel', e.target.checked); }
   replan();
 });
-// ouvre la page de confirmation pour un échange proposé ; l'action n'a lieu qu'après « Valider »
+// ouvre la page de confirmation pour un échange proposé ; la fenêtre d'échange Steam ne s'ouvre qu'après « Valider »
 function reviewAuto(t) {
-  const money2 = (n) => n + ' cr';
+  const money2 = (n) => n + ' cr', toGive = (l) => l.map((g) => ({ assetid: g.assetid, name: g.name, appid: g.appid })), toAsk = (l) => l.map((c) => ({ assetid: c.assetid || '', hash: c.hash, name: c.name, appid: c.appid }));
   if (t.kind === 'friend') {
-    return confirmTrade({ title: `Offre à ${t.friend.name}`, who: `👥 Offre d'échange Steam à ${t.friend.name}`, asks: t.asks, gives: t.gives, summary: `Environ ${money(t.askTotal)} contre ${money(t.giveTotal)}. L'offre part sur ton compte Steam ; ${esc(t.friend.name)} devra l'accepter (et tu devras la confirmer dans l'app Steam mobile si elle est protégée).`,
-      warn: t.gives.length < t.asks.length ? 'Tu donnes moins de cartes que tu n\'en demandes : l\'offre risque d\'être refusée.' : '', validateLabel: 'Valider et envoyer l\'offre' },
-    () => sendFriendOffer(t.friend.steamid, t.gives.map((g) => g.assetid), t.asks.map((c) => c.assetid)));
+    return confirmTrade({ title: `Échange avec ${t.friend.name}`, window: true, who: `👥 Offre d'échange Steam à ${t.friend.name}`, asks: t.asks, gives: t.gives, summary: `Environ ${money(t.askTotal)} contre ${money(t.giveTotal)}.`,
+      warn: t.gives.length < t.asks.length ? 'Tu donnes moins de cartes que tu n\'en demandes : l\'offre risque d\'être refusée.' : '', validateLabel: 'Valider et ouvrir la fenêtre d\'échange Steam' },
+    () => openSteamWindow({ source: 'friend', friendId: t.friend.steamid, give: toGive(t.gives), ask: toAsk(t.asks) }),
+    { label: '📨 Envoyer directement l\'offre', run: () => sendFriendOffer(t.friend.steamid, t.gives.map((g) => g.assetid), t.asks.map((c) => c.assetid)) });
   }
   const sell = t.kind === 'sell';
-  confirmTrade({ title: sell ? 'Vente au bot' : 'Échange avec le bot', who: sell ? '💰 Vente de cartes à SteamCardExchange' : '🤖 Échange avec SteamCardExchange', unit: 'cr', asks: t.asks.map((c) => ({ ...c })), gives: t.gives, validateLabel: sell ? 'Valider et ouvrir le bot' : 'Valider et ouvrir le bot',
-    summary: sell ? `Tu vends ${t.gives.length} carte(s) pour +${money2(t.giveTotal)} (solde après : ${money2(t.balanceAfter)}).<br><small class="mut">Une fenêtre du bot s'ouvre dans l'application : tu y fais « Make Offer » avec ces cartes. Rien n'est vendu avant ton action dans cette fenêtre.</small>` : `Tu paies ${money2(t.askTotal)} : ${t.giveTotal ? 'revente de ' + t.gives.length + ' carte(s) (' + money2(t.giveTotal) + ') + ' : ''}ton solde. Solde après : ${money2(t.balanceAfter)}.<br><small class="mut">Une fenêtre du bot s'ouvre dans l'application avec un bouton « Quick-Trade » par carte : l'achat ne part que quand tu cliques dessus.</small>` },
-  async () => {
-    if (sell) { const r = await api('/api/auto/open', { mode: 'sell', names: t.gives.map((g) => g.name) }); if (!r.opened) window.open(r.url, '_blank'); return; }
-    for (const g of t.games) { const r = await api('/api/auto/open', { appid: g.appid, names: g.cards }); if (!r.opened) window.open(r.url, '_blank'); }
-  });
+  confirmTrade({ title: sell ? 'Vente au bot' : 'Échange avec le bot', window: true, who: sell ? '💰 Vente de cartes à SteamCardExchange' : '🤖 Échange avec SteamCardExchange', unit: 'cr', asks: t.asks.map((c) => ({ ...c })), gives: t.gives, validateLabel: 'Valider et ouvrir la fenêtre d\'échange Steam',
+    summary: sell ? `Tu vends ${t.gives.length} carte(s) pour +${money2(t.giveTotal)} (solde après : ${money2(t.balanceAfter)}).` : `Tu paies ${money2(t.askTotal)} : ${t.giveTotal ? 'revente de ' + t.gives.length + ' carte(s) (' + money2(t.giveTotal) + ') + ' : ''}ton solde. Solde après : ${money2(t.balanceAfter)}.`,
+    warn: 'Le bot SteamCardExchange traite ses échanges depuis son site : s\'il refuse l\'offre envoyée directement, dis-le-moi.' },
+  () => openSteamWindow({ source: 'bot', give: toGive(t.gives), ask: toAsk(t.asks) }));
 }
 $('#abody').addEventListener('click', safe(async (e) => {
   const sc = e.target.closest('[data-asrc]');
@@ -487,6 +612,9 @@ async function fillProgress(btn, estSec, promiseOrFn) {
   try { return await promise; } finally { clearInterval(iv); btn._ac = null; btn.classList.remove('running'); btn.style.setProperty('--p', '0%'); btn.querySelector('.pc').textContent = '▶'; small.textContent = keep; }
 }
 
+// croix pour effacer toutes les barres de recherche (bouton data-clear="id-du-champ")
+document.addEventListener('click', (e) => { const b = e.target.closest('[data-clear]'); if (!b) return; const i = document.getElementById(b.dataset.clear); if (!i) return; i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true })); b.hidden = true; i.focus(); });
+document.addEventListener('input', (e) => { if (!e.target.id) return; const b = document.querySelector(`[data-clear="${e.target.id}"]`); if (b) b.hidden = !e.target.value; });
 // ---------- panier ----------
 function cardIndex() { // cartes manquantes de tous les jeux, par hash
   const m = new Map();
@@ -549,7 +677,7 @@ function render() {
 
 function showView() {
   document.querySelectorAll('#views button[data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === view));
-  $('#v-sets').hidden = view !== 'sets'; $('#v-boosters').hidden = view !== 'boosters'; $('#v-rank').hidden = view !== 'rank'; $('#v-wish').hidden = view !== 'wish'; $('#v-prog').hidden = view !== 'prog'; $('#v-deals').hidden = view !== 'deals'; $('#v-journal').hidden = view !== 'journal'; $('#v-friends').hidden = view !== 'friends';
+  $('#v-sets').hidden = view !== 'sets'; $('#v-boosters').hidden = view !== 'boosters'; $('#v-rank').hidden = view !== 'rank'; $('#v-wish').hidden = view !== 'wish'; $('#v-prog').hidden = view !== 'prog'; $('#v-deals').hidden = view !== 'deals'; $('#v-journal').hidden = view !== 'journal'; $('#v-friends').hidden = view !== 'friends'; $('#v-fprofile').hidden = view !== 'fprofile';
   if (view === 'friends') drawFriends(); if (view === 'journal') drawJournal(); if (view === 'prog') drawProg(); if (view === 'deals') drawDeals(); if (view === 'wish') drawWish(); if (view === 'sets') draw(); if (view === 'boosters') drawBoosters(); if (view === 'rank') drawRank();
 }
 $('#views').onclick = (e) => {
@@ -774,16 +902,15 @@ $('#go').onclick = () => {
   if (!T.pv) return;
   const asks = T.pv.ask.filter((c) => T.askSel.has(c.assetid)), gives = [...T.pv.give, ...T.pv.giveMore].filter((c) => T.giveSel.has(c.assetid));
   const who = T.source === 'friend' ? (T.friends.find((f) => f.id === T.friendId) || { name: 'ton ami' }).name : 'ton partenaire (lien d\'échange)';
-  confirmTrade({ title: 'Vérifie et valide l\'échange', who: `Offre d'échange Steam à ${who}`, asks, gives, validateLabel: 'Valider et envoyer l\'offre',
-    summary: `Les cartes du panier ci-dessous. L'offre part sur ton compte Steam (connexion demandée si besoin), puis sa page s'ouvre dans l'application.`,
+  const tradeUrl = $('#turl') ? $('#turl').value : '', done = () => { for (const c of asks) basket.delete(c.hash); $('#dlg').close(); renderBasket(); };
+  confirmTrade({ title: 'Vérifie et valide l\'échange', window: true, who: `Échange Steam avec ${who}`, asks, gives, validateLabel: 'Valider et ouvrir la fenêtre d\'échange Steam', summary: 'Les cartes de ton panier.',
     warn: gives.length < asks.length ? 'Tu donnes moins de cartes que tu n\'en demandes : l\'offre risque d\'être refusée.' : '' },
-  async () => {
+  async () => { await openSteamWindow({ source: T.source === 'friend' ? 'friend' : 'url', friendId: T.friendId, give: gives.map((c) => ({ assetid: c.assetid, name: c.name, appid: c.appid })), ask: asks.map((c) => ({ assetid: c.assetid, hash: c.hash, name: c.name, appid: c.appid })), tradeUrl }); done(); },
+  { label: '📨 Envoyer directement l\'offre', run: async () => {
     if (!(await ensureLogin())) throw new Error('Connexion à Steam annulée : rien n\'a été envoyé.');
-    const r = await api('/api/trade/send', { source: T.source, friendId: T.friendId, tradeUrl: $('#turl') ? $('#turl').value : '', give: gives.map((c) => c.assetid), ask: asks.map((c) => c.assetid), gift: !asks.length, confirmed: true });
-    for (const c of asks) basket.delete(c.hash);
-    toast('✅ ' + r.note); $('#dlg').close(); renderBasket();
-    if (r.id && r.id !== '000000') window.open(`https://steamcommunity.com/tradeoffer/${r.id}/`, '_blank'); // la page de l'offre, dans une fenêtre de l'application
-  });
+    const r = await api('/api/trade/send', { source: T.source, friendId: T.friendId, tradeUrl, give: gives.map((c) => c.assetid), ask: asks.map((c) => c.assetid), gift: !asks.length, confirmed: true });
+    toast('✅ ' + r.note); done(); if (r.id && r.id !== '000000') window.open(`https://steamcommunity.com/tradeoffer/${r.id}/`, '_blank');
+  } });
 };
 
 // ---------- boosters ----------
@@ -812,7 +939,7 @@ async function drawCatalog() {
   const sortBy = lsGet('sbt.catsort', 'own');
   const rows = r.list.filter((x) => !q || (x.name || '').toLowerCase().includes(q)).sort(sortBy === 'rent' ? (a, b) => (b.perK ?? -1) - (a.perK ?? -1) : (a, b) => (own.has(b.appid) - own.has(a.appid)) || a.price - b.price).slice(0, 60);
   box.innerHTML = `<p class="mut small">💎 ${nf(r.gems.total)} gemmes disponibles · ${r.list.length} boosters · mis à jour ${new Date(r.t).toLocaleTimeString('fr-FR')}</p>
-   <div class="row" style="justify-content:flex-start;gap:8px;margin:8px 0"><div class="search"><input id="catq" placeholder="Filtrer les boosters…" value="${esc(catQ)}"></div><select id="catsort"><option value="own" ${sortBy === 'own' ? 'selected' : ''}>Mes jeux d'abord, puis moins cher</option><option value="rent" ${sortBy === 'rent' ? 'selected' : ''}>Les plus rentables d'abord</option></select></div>
+   <div class="row" style="justify-content:flex-start;gap:8px;margin:8px 0"><div class="search"><input id="catq" placeholder="Filtrer les boosters…" value="${esc(catQ)}"><button class="qx" data-clear="catq" ${catQ ? '' : 'hidden'} aria-label="Effacer">✕</button></div><select id="catsort"><option value="own" ${sortBy === 'own' ? 'selected' : ''}>Mes jeux d'abord, puis moins cher</option><option value="rent" ${sortBy === 'rent' ? 'selected' : ''}>Les plus rentables d'abord</option></select></div>
    <div class="flist">${rows.map((x) => `<div class="frow"><div class="grow"><b>${esc(x.name || 'Jeu ' + x.appid)}</b>${own.has(x.appid) ? ' <small class="mut">· dans tes sets</small>' : ''}<br><small>${nf(x.price)} 💎${x.ev != null ? ` · 3 cartes ≈ ${money(x.ev)}${x.evCredits ? ` / ${x.evCredits} cr` : ''} · <b title="valeur des cartes pour 1 000 gemmes">${money(x.perK)} / 1 000 💎</b>` : ''}${x.unavailable ? ' · indisponible' + (x.availableAtTime ? ' jusqu\'au ' + new Date(x.availableAtTime).toLocaleString('fr-FR') : '') : ''}</small></div><button class="ghost sm" data-craft="${x.appid}" ${x.unavailable || (r.gems.total && r.gems.total < x.price) ? 'disabled' : ''}>🛠 Fabriquer</button></div>`).join('')}</div>`;
   $('#catsort').onchange = () => { lsSet('sbt.catsort', $('#catsort').value); drawCatalog(); };
   const qi = $('#catq'); qi.oninput = () => { catQ = qi.value; const pos = qi.selectionStart; drawCatalog().then(() => { const n = $('#catq'); n.focus(); n.setSelectionRange(pos, pos); }); };
@@ -842,6 +969,7 @@ $('#bgrid').addEventListener('click', (e) => {
 // ---------- classement ----------
 async function loadGlobal() { try { glob = await api('/api/rank/global'); } catch (e) { glob = { error: e.message, list: [] }; } rSig = ''; drawRank(); }
 $('#rbody').addEventListener('click', safe(async (e) => {
+  const fp = e.target.closest('[data-fprof]'); if (fp) { e.preventDefault(); return openFriendProfile(fp.dataset.fprof); }
   const c = e.target.closest('[data-cmp]'); if (!c) return;
   const d = await api('/api/compare/' + c.dataset.cmp), L = (title, l, n, f) => `<div class="cbox"><h4>${title} <small class="mut">(${n})</small></h4>${l.length ? `<ul class="cl">${l.map(f).join('')}</ul>` : '<p class="mut small">Aucun.</p>'}</div>`;
   $('#cbody').innerHTML = `<h3>⚔ Toi contre ${esc(d.friend.name)}</h3><div class="kpis"><div class="stat"><b>${d.me.level} / ${d.friend.level}</b><small>niveau (toi / lui)</small></div><div class="stat"><b>${nf(d.me.badgeCount)} / ${nf(d.friend.badgeCount)}</b><small>badges</small></div><div class="stat"><b>${nf(d.me.rarity)} / ${nf(d.friend.rarity)}</b><small>rareté</small></div></div>
@@ -853,9 +981,9 @@ function drawRank() {
   const sig = JSON.stringify([rankTab, $('#rmetric').value, st.rank, glob, st.leaderboard]); if (sig === rSig) return; rSig = sig;
   document.querySelectorAll('#rtabs button').forEach((b) => b.classList.toggle('on', b.dataset.r === rankTab));
   const m = $('#rmetric').value, box = $('#rbody');
-  const table = (list) => `<table class="rank"><tr><th></th><th>Joueur</th><th>Niveau</th><th>Badges</th><th>Rareté</th></tr>${[...list].sort((a, b) => (b[m] || 0) - (a[m] || 0)).map((p, i) => `
-    <tr class="${p.me ? 'me' : ''}"><td class="n">${['🥇', '🥈', '🥉'][i] || i + 1}</td><td><img src="${esc(p.avatar || '')}" alt="">${esc(p.name)}${p.me ? ' (toi)' : ''}</td>
-    <td class="${m === 'level' || m === 'xp' ? 'hl' : ''}">${esc(p.level)}${!p.me && rankTab === 'friends' ? ` <button class="ghost sm" data-cmp="${esc(p.steamid)}" title="Comparer tes badges avec ${esc(p.name)}">⚔</button>` : ''}</td><td class="${m === 'badgeCount' ? 'hl' : ''}">${nf(p.badgeCount)}</td><td class="${m === 'rarity' ? 'hl' : ''}">${nf(p.rarity)}${p.rareCount != null ? ` <small class="mut">· ${esc(p.rareCount)} rares</small>` : ''}</td></tr>`).join('')}</table>`;
+  const table = (list) => `<table class="rank"><tr><th></th><th>Joueur</th><th>Niveau</th><th>Badges</th><th>Rareté</th><th>🃏 Cartes</th><th>📦 Boosters</th></tr>${[...list].sort((a, b) => (b[m] || 0) - (a[m] || 0)).map((p, i) => `
+    <tr class="${p.me ? 'me' : ''}"><td class="n">${['🥇', '🥈', '🥉'][i] || i + 1}</td><td><img src="${esc(p.avatar || '')}" alt="">${!p.me && rankTab === 'friends' ? `<a href="#" class="lnk" data-fprof="${esc(p.steamid)}" title="Voir son profil">${esc(p.name)}</a>` : esc(p.name)}${p.me ? ' (toi)' : ''}</td>
+    <td class="${m === 'level' || m === 'xp' ? 'hl' : ''}">${esc(p.level)}${!p.me && rankTab === 'friends' ? ` <button class="ghost sm" data-cmp="${esc(p.steamid)}" title="Comparer tes badges avec ${esc(p.name)}">⚔</button>` : ''}</td><td class="${m === 'badgeCount' ? 'hl' : ''}">${nf(p.badgeCount)}</td><td class="${m === 'rarity' ? 'hl' : ''}">${nf(p.rarity)}${p.rareCount != null ? ` <small class="mut">· ${esc(p.rareCount)} rares</small>` : ''}</td>${(() => { const c = p.me ? { cards: (st.me || {}).cards, boosters: (st.me || {}).boosters } : ((st.friends.counts || {})[p.steamid] || {}); return `<td>${c.cards != null ? nf(c.cards) : '<span class="mut" title="Lance 👥 Amis">–</span>'}</td><td>${c.boosters != null ? nf(c.boosters) : '<span class="mut">–</span>'}</td>`; })()}</tr>`).join('')}</table>`;
   if (rankTab === 'friends') {
     const r = st.rank;
     const head = `<div class="row" style="margin-bottom:12px"><span class="mut">${r.status === 'loading' ? `Analyse ${r.done}/${r.total}…` : r.status === 'error' ? '⚠ ' + esc(r.error) : r.list.length ? `${r.list.length} joueurs` : 'Pas encore analysé'}</span><button class="ghost" id="rscan">${r.list.length ? '↻ Réanalyser' : '👥 Analyser mes amis'}</button></div>`;

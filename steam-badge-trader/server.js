@@ -110,6 +110,25 @@ app.post('/api/auto/plan', (req, res) => { try { res.json(engine.autoPlan(req.bo
 app.post('/api/auto/open', (req, res) => { try { res.json(sce.openGame(Number(req.body.appid), (req.body.names || []).map(String).slice(0, 60), req.body.mode === 'sell' ? 'sell' : 'buy')); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.get('/api/friends/needs', (_, res) => { try { res.json(engine.friendNeeds()); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/botcheck', (_, res) => { if (isDemo()) { Promise.resolve(engine.scanVerify({ all: true, force: true, cfg: cfg() })).catch(() => {}); } else Promise.resolve(engine.scanVerify({ all: true, force: true, cfg: cfg() })).catch((e) => { S.error = e.message; }); res.json({ ok: true }); });
+app.get('/api/friends/profile/:id', (req, res) => { try { res.json(engine.friendProfile(String(req.params.id))); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.get('/api/friends/compose/:id', (req, res) => { try { res.json(engine.friendCompose(String(req.params.id))); } catch (e) { res.status(400).json({ error: e.message }); } });
+// Fenêtre d'échange Steam préparée (cartes déjà placées) : rien n'est envoyé, tu cliques toi-même sur « Faire l'offre »
+const BOT_TRADE_RE = /^https:\/\/steamcommunity\.com\/tradeoffer\/new\/\?partner=\d+&token=[\w-]+$/;
+app.post('/api/steamtrade/open', (req, res) => {
+  try {
+    const { source, friendId, tradeUrl } = req.body;
+    if (req.body.confirmed !== true) throw new Error('Non validé : confirme d\'abord sur la page de confirmation.');
+    const clean = (l, mine) => (Array.isArray(l) ? l : []).slice(0, 12).map((x) => ({ assetid: x.assetid ? String(x.assetid) : '', hash: x.hash ? String(x.hash) : '', name: String(x.name || '').slice(0, 120), appid: x.appid ? Number(x.appid) : 0 }));
+    const give = clean(req.body.give), ask = clean(req.body.ask);
+    const own = new Set(S.myCards.filter((c) => c.tradable !== false).map((c) => String(c.assetid)));
+    if (!isDemo() && give.some((g) => g.assetid && !own.has(g.assetid))) throw new Error('Une carte à donner n\'est plus dans ton inventaire : actualise puis recommence.');
+    let url;
+    if (source === 'friend') { if (isDemo()) url = 'https://steamcommunity.com/tradeoffer/new/?partner=1'; else { if (!/^\d{17}$/.test(String(friendId))) throw new Error('Ami inconnu'); url = `https://steamcommunity.com/tradeoffer/new/?partner=${(BigInt(friendId) - 76561197960265728n).toString()}`; } }
+    else if (source === 'bot') { url = tradeUrl || env.BOT_TRADE_URL; if (!url || !BOT_TRADE_RE.test(url)) throw new Error('BOT_LINK'); }
+    else { if (!BOT_TRADE_RE.test(String(tradeUrl))) throw new Error('Lien d\'échange invalide.'); url = tradeUrl; }
+    res.json(sce.openSteamTrade(url, { give, ask }));
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
 app.get('/api/goal', (req, res) => { try { res.json(engine.goalPlan(req.query.level)); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.get('/api/spare', (_, res) => { try { res.json(engine.spareReport()); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/event/add', (req, res) => { try { engine.eventAdd(req.body.name, req.body.start, req.body.end); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });

@@ -48,6 +48,43 @@ function routeUrl(u, from) {
   if (proto === 'https:' || proto === 'http:' || proto === 'steam:') shell.openExternal(u);
   return { action: 'deny' };
 }
+// Exécuté dans la page d'échange Steam : ajoute les cartes choisies à l'offre ; tu n'as plus qu'à cliquer sur « Faire l'offre »
+async function prepTrade(cfg) {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const bar = document.createElement('div');
+  bar.style.cssText = 'position:fixed;z-index:99999;left:50%;transform:translateX(-50%);bottom:14px;max-width:760px;padding:12px 16px;background:#0f172af2;color:#fff;font:14px/1.4 sans-serif;border:2px solid #22c55e;border-radius:12px;box-shadow:0 8px 30px #000a';
+  document.body.appendChild(bar);
+  const say = (t, bad) => { bar.style.borderColor = bad ? '#f59e0b' : '#22c55e'; bar.textContent = t; };
+  say('⏳ Préparation de l\'échange : chargement des inventaires…');
+  const miss = [];
+  try {
+    for (let i = 0; i < 60 && !(window.UserYou && window.UserThem && window.MoveItemToTrade && window.TradePageSelectInventory); i++) await wait(500);
+    if (!(window.UserYou && window.MoveItemToTrade && window.TradePageSelectInventory)) throw new Error('page d\'échange non reconnue');
+    const load = async (user) => {
+      window.TradePageSelectInventory(user, 753, '6');
+      for (let i = 0; i < 90; i++) { const inv = user.getInventory && user.getInventory(753, 6); if (inv && inv.rgInventory && Object.keys(inv.rgInventory).length) return inv; await wait(500); }
+      return null;
+    };
+    const norm = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const move = async (inv, items, label) => {
+      let n = 0; const used = new Set();
+      for (const want of items) {
+        const all = Object.values(inv.rgInventory);
+        const it = all.find((x) => !used.has(x.id) && ((want.assetid && String(x.id) === String(want.assetid)) || (!want.assetid && ((want.hash && x.market_hash_name === want.hash) || (norm(x.name) === norm(want.name) && (!want.appid || String(x.market_fee_app) === String(want.appid)))))));
+        const el = it && (it.element || document.getElementById('item753_6_' + it.id));
+        if (!it || !el) { miss.push(label + ' : ' + want.name); continue; }
+        used.add(it.id); window.MoveItemToTrade(el); n++; await wait(200);
+      }
+      return n;
+    };
+    let a = 0, b = 0;
+    if (cfg.give.length) { const inv = await load(window.UserYou); if (!inv) throw new Error('ton inventaire n\'a pas chargé'); a = await move(inv, cfg.give, 'à toi'); }
+    if (cfg.ask.length) { const inv = await load(window.UserThem); if (!inv) throw new Error('son inventaire n\'a pas chargé'); b = await move(inv, cfg.ask, 'à lui'); }
+    say(`✔ Cartes ajoutées : ${a} de ton côté, ${b} du sien. Vérifie puis clique sur « Faire l'offre ».` + (miss.length ? ` ⚠ Introuvables (à ajouter à la main) : ${miss.join(' · ')}` : ''), miss.length > 0);
+  } catch (e) {
+    say(`⚠ Je n'ai pas pu préparer l'offre automatiquement (${e.message}). À ajouter à la main — à toi : ${cfg.give.map((x) => x.name).join(', ') || '–'} · à lui : ${cfg.ask.map((x) => x.name).join(', ') || '–'}`, true);
+  }
+}
 // Exécuté dans la page du bot : panneau avec un bouton par carte (un clic = « Quick-Trade » de cette carte) ; rien n'est cliqué sans toi
 function highlightCards(names, mode) {
   const norm = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -74,6 +111,10 @@ function highlightCards(names, mode) {
   for (const [k, n] of want) if (!done.has(k)) row('⚠ carte introuvable sur la page — ' + n, false, null);
 }
 const sceBridge = {
+  openTrade(url, payload) { // fenêtre d'échange Steam (session connectée) avec les cartes déjà placées
+    const w = openInApp(url, 'Échange Steam');
+    w.webContents.on('did-finish-load', () => { setTimeout(() => w.webContents.executeJavaScript(`(${prepTrade.toString()})(${JSON.stringify(payload)})`).catch(() => {}), 1500); });
+  },
   openGame(url, names, mode) {
     const w = openInApp(url, 'SteamCardExchange');
     w.webContents.on('did-finish-load', () => { setTimeout(() => w.webContents.executeJavaScript(`(${highlightCards.toString()})(${JSON.stringify(names)}, ${JSON.stringify(mode || 'buy')})`).catch(() => {}), 1800); });
