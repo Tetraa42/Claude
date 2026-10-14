@@ -60,9 +60,19 @@ async function prepTrade(cfg) {
   try {
     for (let i = 0; i < 60 && !(window.UserYou && window.UserThem && window.MoveItemToTrade && window.TradePageSelectInventory); i++) await wait(500);
     if (!(window.UserYou && window.MoveItemToTrade && window.TradePageSelectInventory)) throw new Error('page d\'échange non reconnue');
-    const load = async (user) => {
-      window.TradePageSelectInventory(user, 753, '6');
-      for (let i = 0; i < 90; i++) { const inv = user.getInventory && user.getInventory(753, 6); if (inv && inv.rgInventory && Object.keys(inv.rgInventory).length) return inv; await wait(500); }
+    const probe = async () => { // raison précise quand l'inventaire de l'ami ne se charge pas
+      try {
+        const r = await fetch(`/tradeoffer/new/partnerinventory/?sessionid=${window.g_sessionID}&partner=${window.g_ulTradePartnerSteamID}&appid=753&contextid=6`, { credentials: 'include' }), j = await r.json();
+        if (j && j.success === false) return j.Error || j.error || 'Steam refuse de lister son inventaire (inventaire privé, ou vous n\'êtes pas amis)';
+        const n = j && j.rgInventory ? Object.keys(j.rgInventory).length : 0; return n ? `Steam le lit (${n} objets) mais la page ne l'affiche pas : recharge la fenêtre` : 'son inventaire de cartes est vide ou privé';
+      } catch (e) { return 'lecture impossible (' + e.message + ')'; }
+    };
+    const load = async (user, them) => {
+      for (let tries = 0; tries < 3; tries++) {
+        if (them) { const tab = document.getElementById('inventory_select_their_inventory'); if (tab) tab.click(); }
+        window.TradePageSelectInventory(user, 753, '6');
+        for (let i = 0; i < 40; i++) { const inv = user.getInventory && user.getInventory(753, 6); if (inv && inv.rgInventory && Object.keys(inv.rgInventory).length) { await wait(1200); return inv; } await wait(500); }
+      }
       return null;
     };
     const norm = (t) => String(t).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -78,8 +88,8 @@ async function prepTrade(cfg) {
       return n;
     };
     let a = 0, b = 0;
-    if (cfg.give.length) { const inv = await load(window.UserYou); if (!inv) throw new Error('ton inventaire n\'a pas chargé'); a = await move(inv, cfg.give, 'à toi'); }
-    if (cfg.ask.length) { const inv = await load(window.UserThem); if (!inv) throw new Error('son inventaire n\'a pas chargé'); b = await move(inv, cfg.ask, 'à lui'); }
+    if (cfg.give.length) { const inv = await load(window.UserYou, false); if (!inv) throw new Error('ton inventaire n\'a pas chargé'); a = await move(inv, cfg.give, 'à toi'); }
+    if (cfg.ask.length) { const inv = await load(window.UserThem, true); if (!inv) throw new Error('son inventaire n\'a pas chargé : ' + (await probe())); b = await move(inv, cfg.ask, 'à lui'); }
     say(`✔ Cartes ajoutées : ${a} de ton côté, ${b} du sien. Vérifie puis clique sur « Faire l'offre ».` + (miss.length ? ` ⚠ Introuvables (à ajouter à la main) : ${miss.join(' · ')}` : ''), miss.length > 0);
   } catch (e) {
     say(`⚠ Je n'ai pas pu préparer l'offre automatiquement (${e.message}). À ajouter à la main — à toi : ${cfg.give.map((x) => x.name).join(', ') || '–'} · à lui : ${cfg.ask.map((x) => x.name).join(', ') || '–'}`, true);

@@ -136,6 +136,7 @@ app.post('/api/event/remove', (req, res) => { engine.eventRemove(String(req.body
 app.get('/api/compare/:id', (req, res) => { try { res.json(engine.compareFriend(req.params.id)); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.get('/api/rare', (_, res) => { try { res.json({ list: engine.rareTargets() }); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/journal/add', (req, res) => { try { engine.journalAdd(req.body || {}); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
+app.post('/api/journal/offers', async (_, res) => { try { res.json({ added: await engine.scanOffers(cfg()) }); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/journal/remove', (req, res) => { engine.journalRemove(String(req.body.id)); res.json({ ok: true }); });
 app.post('/api/wish/add', (req, res) => { try { engine.wishAdd(String(req.body.hash)); engine.checkWishes().catch(() => {}); res.json({ ok: true }); } catch (e) { res.status(400).json({ error: e.message }); } });
 app.post('/api/wish/remove', (req, res) => { engine.wishRemove(String(req.body.hash)); res.json({ ok: true }); });

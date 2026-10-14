@@ -704,6 +704,26 @@ function journalAdd({ type, text, credits, auto }) {
   S.journal.unshift({ id: 'j' + Date.now() + Math.floor(Math.random() * 1000), t: Date.now(), type: ['trade', 'buy', 'sell', 'craft', 'other'].includes(type) ? type : 'other', text: String(text || '').slice(0, 300), credits: c, auto: !!auto });
   if (S.journal.length > 1000) S.journal.length = 1000; saveState();
 }
+// offres d'échange reçues (acceptées / refusées / en attente) importées dans le journal avec les images des cartes et boosters
+const OFFER_STATE = { 2: 'pending', 3: 'accepted', 7: 'declined', 4: 'declined', 6: 'declined', 5: 'declined', 8: 'declined', 10: 'declined' };
+async function scanOffers(cfg) {
+  if (S.demo) return demoOffers();
+  const list = await steam.getReceivedOffers(cfg.key); let n = 0;
+  const base = 76561197960265728n, names = new Map((S.friends.list || []).map((f) => [f.steamid, f.name]));
+  for (const o of list) {
+    const status = OFFER_STATE[o.state]; if (!status || (!o.got.length && !o.gave.length)) continue;
+    const sid = (base + BigInt(o.from)).toString(), id = 'off-' + o.id, entry = { id, t: o.t || Date.now(), type: 'offer', status, credits: 0, auto: true, partner: names.get(sid) || 'Joueur ' + sid, partnerId: sid, got: o.got.slice(0, 12), gave: o.gave.slice(0, 12), raw: o.state,
+      text: `Offre reçue de ${names.get(sid) || 'un joueur'} — ${{ accepted: 'acceptée', declined: o.state === 7 ? 'refusée' : 'annulée / expirée', pending: 'en attente' }[status]}` };
+    const i = S.journal.findIndex((j) => j.id === id); if (i >= 0) { S.journal[i] = entry; } else { S.journal.push(entry); n++; }
+  }
+  S.journal.sort((a, b) => b.t - a.t); if (S.journal.length > 1000) S.journal.length = 1000; saveState(); return n;
+}
+function demoOffers() {
+  const c = (name, g, i) => ({ name, game: g, kind: 'card', img: `/art/${900 + i}/${i}.svg` }), b = (g, i) => ({ name: g + ' Booster Pack', game: g, kind: 'booster', img: `/art/${900 + i}/${i + 3}.svg` });
+  const demo2 = [{ s: 'accepted', p: 'Hugo', got: [c('Ombre', 'Cave of Embers', 1), c('Héros', 'Cave of Embers', 2)], gave: [b('Neon Samurai', 4)] }, { s: 'declined', p: 'Emma', got: [c('Forteresse', 'Frost Kingdom', 3)], gave: [c('Ombre', 'Mecha Garden', 5), c('Héros', 'Mecha Garden', 6)] }, { s: 'pending', p: 'Léo', got: [b('Candy Rally', 7)], gave: [c('Ombre', 'Candy Rally', 8)] }];
+  demo2.forEach((o, i) => { const id = 'off-demo' + i; if (!S.journal.some((j) => j.id === id)) S.journal.push({ id, t: Date.now() - (i + 1) * 5 * 3600e3, type: 'offer', status: o.s, credits: 0, auto: true, partner: o.p, got: o.got, gave: o.gave, text: `Offre reçue de ${o.p} — ${{ accepted: 'acceptée', declined: 'refusée', pending: 'en attente' }[o.s]}` }); });
+  S.journal.sort((a, b) => b.t - a.t); return demo2.length;
+}
 const journalRemove = (id) => { S.journal = S.journal.filter((j) => j.id !== id); saveState(); };
 
 // ---------- tous les badges du profil (pas seulement ceux au niveau 5) ----------
@@ -717,7 +737,8 @@ function allBadges() {
   return out.sort((a, b) => b.level - a.level || a.name.localeCompare(b.name));
 }
 // ---------- 🤖 mode auto : cartes voulues (bot / amis), cartes à donner, échanges de 6 cartes maximum de chaque côté ----------
-const MAXC = 6;
+const MAXC = 6, CAP = 100; // 6 cartes par côté et 100 crédits par échange avec le bot
+const chunks = (list, val) => { const out = []; let cur = [], sum = 0; for (const x of list) { const v = val(x) || 0; if (cur.length && (cur.length >= MAXC || sum + v > CAP + 1e-4)) { out.push(cur); cur = []; sum = 0; } cur.push(x); sum += v; } if (cur.length) out.push(cur); return out; };
 function autoData() {
   const bal = sce.status().balance || 0, wanted = [];
   for (const s of S.sets) {
@@ -743,9 +764,9 @@ function autoData() {
 // Vente au bot : les cartes choisies (rien de choisi = aucune vente) par paquets de 6 au maximum, les plus chères d'abord
 function sellPlan(giveIds) {
   const data = autoData(), sel = new Set((giveIds || []).map(String)), pick = data.give.filter((g) => sel.has(String(g.assetid))).sort((a, b) => b.worth - a.worth), trades = [];
-  for (let i = 0; i < pick.length; i += MAXC) {
-    const chunk = pick.slice(i, i + MAXC), total = +chunk.reduce((t, g) => t + (g.worth || 0), 0).toFixed(2);
-    trades.push({ id: 's' + i, kind: 'sell', asks: [], gives: chunk.map((g) => ({ assetid: g.assetid, name: g.name, img: g.img, game: g.game, worth: g.worth, over: false })), askTotal: 0, giveTotal: total, balanceAfter: +(data.balance + total).toFixed(2), feasible: total > 0, short: 0, games: [] });
+  for (const [i, chunk] of chunks(pick, (g) => g.worth).map((c, n) => [n, c])) {
+    const total = +chunk.reduce((t, g) => t + (g.worth || 0), 0).toFixed(2);
+    trades.push({ id: 's' + i, kind: 'sell', asks: [], gives: chunk.map((g) => ({ assetid: g.assetid, name: g.name, img: g.img, game: g.game, worth: g.worth, eur: g.price, cr: g.worth, over: false })), askTotal: 0, giveTotal: total, balanceAfter: +(data.balance + total).toFixed(2), feasible: total > 0, short: 0, games: [] });
   }
   return { balance: data.balance, trades, total: +trades.reduce((t, x) => t + x.giveTotal, 0).toFixed(2), count: pick.length };
 }
@@ -758,7 +779,7 @@ function autoPlan(asks, giveIds, mode) {
   const pickCover = (need) => { // cartes les moins gaspilleuses pour couvrir `need` crédits (6 au maximum)
     const picked = []; let got = 0;
     while (got < need - 1e-4 && picked.length < MAXC) {
-      const rest = need - got, avail = pool.filter((g) => g.worth > 0 && !picked.includes(g)); // une carte à 0 crédit ne paie rien
+      const rest = need - got, avail = pool.filter((g) => g.worth > 0 && !picked.includes(g) && got + g.worth <= CAP + 1e-4); // une carte à 0 crédit ne paie rien
       if (!avail.length) break;
       const exact = avail.filter((g) => g.worth >= rest - 1e-4).sort((a, b) => a.worth - b.worth)[0] || avail.sort((a, b) => b.worth - a.worth)[0];
       picked.push(exact); got += exact.worth;
@@ -766,14 +787,14 @@ function autoPlan(asks, giveIds, mode) {
     return { picked, got };
   };
   const botAsks = (asks || []).filter((a) => a.src === 'bot').map((a) => byHash.get(a.hash)).filter((w) => w && w.bot).sort((a, b) => a.appid - b.appid || b.bot.price - a.bot.price);
-  for (let i = 0; i < botAsks.length; i += MAXC) {
-    const chunk = botAsks.slice(i, i + MAXC), need = +chunk.reduce((t, w) => t + w.bot.price, 0).toFixed(2), toCover = Math.max(0, +(need - bal).toFixed(2));
+  for (const [i, chunk] of chunks(botAsks, (w) => w.bot.price).map((c, n) => [n, c])) {
+    const need = +chunk.reduce((t, w) => t + w.bot.price, 0).toFixed(2), toCover = Math.max(0, +(need - bal).toFixed(2));
     const { picked, got } = toCover > 1e-4 ? pickCover(toCover) : { picked: [], got: 0 }, feasible = got + 1e-4 >= toCover;
     for (const g of picked) pool.splice(pool.indexOf(g), 1); // une carte n'apparaît que dans un seul échange, même si celui-ci est impossible
     if (feasible) bal = +(bal + got - need).toFixed(2);
     const games = [...new Map(chunk.map((w) => [w.appid, { appid: w.appid, name: w.game, url: sce.gameUrl(w.appid), cards: [] }])).values()];
     for (const w of chunk) games.find((g) => g.appid === w.appid).cards.push(w.name);
-    trades.push({ id: 'b' + i, kind: 'bot', asks: chunk.map((w) => ({ hash: w.hash, name: w.name, img: w.img, game: w.game, appid: w.appid, price: w.bot.price, tradeUrl: w.bot.tradeUrl })), gives: picked.map((g) => ({ assetid: g.assetid, name: g.name, img: g.img, game: g.game, worth: g.worth })),
+    trades.push({ id: 'b' + i, kind: 'bot', asks: chunk.map((w) => ({ hash: w.hash, name: w.name, img: w.img, game: w.game, appid: w.appid, price: w.bot.price, eur: w.price, cr: w.bot.price, tradeUrl: w.bot.tradeUrl })), gives: picked.map((g) => ({ assetid: g.assetid, name: g.name, img: g.img, game: g.game, worth: g.worth, eur: g.price, cr: g.worth })),
       askTotal: need, giveTotal: +got.toFixed(2), balanceAfter: bal, feasible, short: feasible ? 0 : +(toCover - got).toFixed(2), games });
   }
   const byFriend = new Map();
@@ -783,8 +804,8 @@ function autoPlan(asks, giveIds, mode) {
       const chunk = list.slice(i, i + MAXC), gives = [];
       for (const g of [...pool].sort((a, b) => b.price - a.price)) { if (gives.length >= chunk.length) break; gives.push(g); } // échange carte contre carte : autant que demandé (6 max)
       for (const g of gives) pool.splice(pool.indexOf(g), 1);
-      trades.push({ id: 'f' + f.steamid + i, kind: 'friend', friend: { steamid: f.steamid, name: f.name }, asks: chunk.map((x) => ({ hash: x.w.hash, name: x.w.name, img: x.w.img, game: x.w.game, appid: x.w.appid, price: x.w.price, assetid: x.assetid })),
-        gives: gives.map((g) => ({ assetid: g.assetid, name: g.name, img: g.img, game: g.game, worth: g.price })), askTotal: +chunk.reduce((t, x) => t + (x.w.price || 0), 0).toFixed(2), giveTotal: +gives.reduce((t, g) => t + (g.price || 0), 0).toFixed(2), feasible: gives.length > 0, short: 0 });
+      trades.push({ id: 'f' + f.steamid + i, kind: 'friend', friend: { steamid: f.steamid, name: f.name }, asks: chunk.map((x) => ({ hash: x.w.hash, name: x.w.name, img: x.w.img, game: x.w.game, appid: x.w.appid, price: x.w.price, eur: x.w.price, cr: x.w.bot ? x.w.bot.worth : null, assetid: x.assetid })),
+        gives: gives.map((g) => ({ assetid: g.assetid, name: g.name, img: g.img, game: g.game, worth: g.price, eur: g.price, cr: g.worth })), askTotal: +chunk.reduce((t, x) => t + (x.w.price || 0), 0).toFixed(2), giveTotal: +gives.reduce((t, g) => t + (g.price || 0), 0).toFixed(2), feasible: gives.length > 0, short: 0 });
     }
   }
   return { balance: data.balance, trades };
@@ -835,13 +856,15 @@ function friendProfile(id) {
     boosters: (F.boosters || {})[id] || [], games: needs.games, giveCount: needs.giveCount, completes: needs.completes, hasInv: F.all.has(id), hasBadges: bd.length > 0 };
 }
 // Tout ce qu'il faut pour composer un échange FAVORABLE à l'ami : ce qu'il a pour toi, et toutes tes cartes (celles dont il a besoin d'abord)
+// valeur d'une carte en crédits SteamCardExchange (page du jeu si lue, sinon moyenne du jeu)
+const crOf = (appid, game, name) => { const i = sce.cardInfo(appid, name), b = sce.lookup(appid, game); return i && i.worth != null ? i.worth : b && b.worth != null ? b.worth : null; };
 function friendCompose(id) {
   const f = S.friends.list.find((x) => x.steamid === id) || { name: id }, needs = friendNeeds().friends.find((x) => x.steamid === id) || { games: [] };
   const needed = new Set(needs.games.flatMap((g) => g.canGive.map((c) => c.hash))), spareIds = new Set(spareCards().map((c) => String(c.assetid)));
   const price = new Map(); for (const s of S.sets) for (const c of s.cards) price.set(c.hash, c.price || 0);
-  const give = S.myCards.filter((c) => c.tradable !== false).map((c) => ({ assetid: c.assetid, hash: c.hash, name: c.name, game: c.game, appid: c.appid, img: c.img, price: price.get(c.hash) || 0, needed: needed.has(c.hash), spare: spareIds.has(String(c.assetid)) }))
+  const give = S.myCards.filter((c) => c.tradable !== false).map((c) => ({ assetid: c.assetid, hash: c.hash, name: c.name, game: c.game, appid: c.appid, img: c.img, price: price.get(c.hash) || 0, cr: crOf(c.appid, c.game, c.name), needed: needed.has(c.hash), spare: spareIds.has(String(c.assetid)) }))
     .sort((a, b) => (b.needed - a.needed) || (b.spare - a.spare) || b.price - a.price);
-  const take = needs.games.flatMap((g) => g.iNeed.map((c) => ({ ...c, game: g.name, appid: g.appid })));
+  const take = needs.games.flatMap((g) => g.iNeed.map((c) => ({ ...c, game: g.name, appid: g.appid, cr: crOf(g.appid, g.name, c.name) })));
   return { friend: { steamid: id, name: f.name, avatar: f.avatar }, give, take };
 }
 
@@ -952,4 +975,4 @@ function spareCards() {
   }
   return out;
 }
-module.exports = { S, friendProfile, friendCompose, scanPrices, friendNeeds, autoData, autoPlan, goalPlan, spareReport, eventAdd, eventRemove, compareFriend, rareTargets, journalAdd, journalRemove, deals, wishTarget, alertSet, exportData, importData, setsCsv, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };
+module.exports = { S, friendProfile, friendCompose, scanPrices, friendNeeds, autoData, autoPlan, goalPlan, spareReport, eventAdd, eventRemove, compareFriend, rareTargets, journalAdd, journalRemove, scanOffers, deals, wishTarget, alertSet, exportData, importData, setsCsv, scanVerify, wishAdd, wishRemove, checkWishes, readiness, run, reset, cancel, setCatalog, catalogList, setGemValue, demoCatalog, refreshBot, scanBadges, scanCards, scanBoosters, scanGems, scanBalance, demoScan, checkGameAll, scanFriends, scanRank, loadDemo, loadSaved, isFresh, badgesFresh, saveState, snapshot, spareCards, groupBy, gameDetail, missingByHash, flush, BOT_DEFAULT };

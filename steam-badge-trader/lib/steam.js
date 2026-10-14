@@ -208,4 +208,14 @@ async function getSet(appid, currency, maxAge = Infinity) {
   return { set, fromCache: false, t: Date.now() };
 }
 
-module.exports = { inTask, cancelTask, isCancelled, rate, setAuthFetch, getBadgeDrops, resolveSteamId, getSummaries, getProfile, getBadgeStats, getOwnedNames, getFriends, getInventory, getCards, getSet, cachedSet, flushCache, CDN, sleep, rarityPoints };
+// offres d'échange REÇUES (historique + en attente) avec les descriptions des objets : sert au journal
+async function getReceivedOffers(key) {
+  if (!key) throw new Error('Clé API Steam manquante (Réglages) : impossible de lire tes offres reçues.');
+  const cutoff = Math.floor(Date.now() / 1000) - 120 * 86400;
+  const d = await jget(`https://api.steampowered.com/IEconService/GetTradeOffers/v1/?key=${key}&get_received_offers=1&get_sent_offers=0&get_descriptions=1&active_only=1&historical_only=1&time_historical_cutoff=${cutoff}&language=french`);
+  const r = (d && d.response) || {}, desc = new Map((r.descriptions || []).map((x) => [`${x.appid}_${x.classid}_${x.instanceid || 0}`, x]));
+  const item = (x) => { const e = desc.get(`${x.appid}_${x.classid}_${x.instanceid || 0}`) || {}; if (Number(x.appid) !== 753) return null; const t = String(e.type || '');
+    return { name: e.name || e.market_hash_name || 'Objet', img: e.icon_url ? CDN + e.icon_url + '/96fx96f' : '', kind: /booster/i.test(t) || /booster/i.test(e.name || '') ? 'booster' : /gem|gemme|sack|sac/i.test(t + (e.name || '')) ? 'gem' : /card|carte/i.test(t) ? 'card' : 'item', game: t.replace(/ (Trading Card|Booster Pack|Carte à échanger)$/i, '') }; };
+  return (r.trade_offers_received || []).map((o) => ({ id: String(o.tradeofferid), state: o.trade_offer_state, from: String(o.accountid_other), t: (o.time_updated || o.time_created || 0) * 1000, message: o.message || '', got: (o.items_to_receive || []).map(item).filter(Boolean), gave: (o.items_to_give || []).map(item).filter(Boolean) }));
+}
+module.exports = { getReceivedOffers, inTask, cancelTask, isCancelled, rate, setAuthFetch, getBadgeDrops, resolveSteamId, getSummaries, getProfile, getBadgeStats, getOwnedNames, getFriends, getInventory, getCards, getSet, cachedSet, flushCache, CDN, sleep, rarityPoints };

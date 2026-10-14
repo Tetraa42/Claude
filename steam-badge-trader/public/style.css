@@ -222,3 +222,30 @@ details.cbox>summary{cursor:pointer}
 select option,select optgroup{background:var(--card);color:var(--tx)}select optgroup{font-weight:700;color:var(--ac)}
 details.cbox>summary{list-style:none;cursor:pointer}details.cbox>summary::-webkit-details-marker{display:none}details.cbox>summary:before{content:"▸ ";color:var(--ac)}details.cbox[open]>summary:before{content:"▾ "}
 .wtool{padding:6px 0}.frow input[type=checkbox]{flex:none;width:18px;height:18px}
+.chip.on{outline:2px solid var(--ac);background:color-mix(in srgb,var(--ac) 22%,transparent)}
+article.set.pick{cursor:pointer}article.set.pick:hover{outline:2px solid var(--ac)}
+.clk{cursor:pointer}b.clk:hover{text-decoration:underline}
+/* noms de jeux et d'amis : jamais en bleu de lien, couleur du texte du thème + une police par thème */
+a,a:visited,a.lnk,.set h3 a,dialog a.lnk,.fdet a{color:var(--tx)}
+a.lnk:hover,.fdet a:hover{color:var(--ac);text-decoration:underline}
+.set h3,.frow b,.fdet summary b,.who h1,h2,h3,h4,a.lnk,.agame b,.tcard small:first-of-type{font-family:var(--fh,inherit);color:var(--tx)}
+:root{--fh:"Segoe UI",system-ui,sans-serif}
+[data-theme=steam]{--fh:"Motiva Sans",Arial,"Helvetica Neue",sans-serif}
+[data-theme=clair]{--fh:"Segoe UI",Roboto,"Helvetica Neue",sans-serif}
+[data-theme=violet]{--fh:"Trebuchet MS","Lucida Grande",sans-serif}
+[data-theme=foret]{--fh:Georgia,"Palatino Linotype",serif}
+[data-theme=braise]{--fh:"Franklin Gothic Medium","Arial Narrow",Impact,sans-serif;letter-spacing:.01em}
+[data-theme=ocean]{--fh:Verdana,Geneva,sans-serif}
+[data-theme=sakura]{--fh:"Segoe Print","Comic Sans MS","Chalkboard SE",cursive}
+[data-theme=noir]{--fh:"Helvetica Neue",Helvetica,Arial,sans-serif;letter-spacing:.03em}
+[data-theme=crt],[data-theme=ambre],[data-theme=gameboy],[data-theme=arcade]{--fh:"Courier New",ui-monospace,Consolas,monospace}
+[data-theme=neon]{--fh:"Tahoma","Trebuchet MS",sans-serif;letter-spacing:.04em}
+[data-theme=cyberpunk]{--fh:"Bahnschrift","Arial Narrow",Impact,sans-serif}
+[data-theme=steampunk],[data-theme=parchemin]{--fh:Georgia,"Palatino Linotype",Palatino,serif}
+[data-theme=synthwave]{--fh:"Arial Black","Gadget",Impact,sans-serif;letter-spacing:.05em}
+[data-theme=vaporwave]{--fh:"Century Gothic","Avant Garde","Trebuchet MS",sans-serif;letter-spacing:.06em}
+.jitems{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px}
+.jit{position:relative;display:inline-flex;flex-direction:column;align-items:center;width:62px;font-size:10px;line-height:1.1;text-align:center}
+.jit img{width:56px;height:56px;object-fit:contain;border-radius:8px;background:#0003}.jit.booster img{outline:2px solid var(--ac2)}.jit i{position:absolute;top:-4px;right:2px;font-style:normal;font-size:13px}
+.jit small{display:block;max-width:62px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.frow.offer.accepted{border-left:3px solid var(--ok)}.frow.offer.declined{border-left:3px solid #ef4444}.frow.offer.pending{border-left:3px solid var(--warn,#fbbf24)}

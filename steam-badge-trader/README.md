@@ -84,3 +84,13 @@ Pour ton vrai compte : copie `.env.example` en `.env`, mets ta clé API Steam (h
 - **Classement** : colonnes Cartes et Boosters.
 - **Mode auto** : ouvre directement la fenêtre d'échange Steam dans l'app, cartes préparées (tu cliques seulement pour valider).
 - ✕ pour effacer les barres de recherche, menus déroulants colorés, **Bons plans** refondu (explications, sets prêts/presque finis, doublons → crédits, marché vs bot).
+
+## Nouveautés (v1.0.24)
+- Échanges avec le bot : **100 crédits maximum par échange** (6 cartes par côté), offre faite directement via le lien d'échange Steam du bot (champ à remplir dans la page de confirmation, mémorisé).
+- Page de confirmation : prix Steam (🛒) **et** crédits (🤖) de chaque carte, avec totaux, des deux côtés.
+- Amis : les boutons 🎁/⭐/✔/🎮 filtrent la liste des jeux de l'ami ; clic sur un badge (jeu) = composer l'échange pour ce jeu.
+- Souhaits : clic sur une carte = où la trouver (bot, amis, marché) et boutons d'échange.
+- Noms de jeux/amis plus en bleu ; police de titres propre à chaque thème.
+- Bons plans : plus de recalcul/clignotement en boucle.
+- Journal : offres d'échange reçues (acceptées, refusées, en attente) avec images des cartes et boosters (clé API Steam requise), filtre.
+- Fenêtre d'échange Steam : chargement de l'inventaire de l'ami plus robuste, avec la raison exacte affichée en cas d'échec.
