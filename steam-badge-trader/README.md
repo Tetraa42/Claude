@@ -94,3 +94,9 @@ Pour ton vrai compte : copie `.env.example` en `.env`, mets ta clé API Steam (h
 - Bons plans : plus de recalcul/clignotement en boucle.
 - Journal : offres d'échange reçues (acceptées, refusées, en attente) avec images des cartes et boosters (clé API Steam requise), filtre.
 - Fenêtre d'échange Steam : chargement de l'inventaire de l'ami plus robuste, avec la raison exacte affichée en cas d'échec.
+
+## Nouveautés (v1.0.25)
+- Onglet Sets : « Échanger avec le bot » ouvre directement l'échange Steam avec le bot (plus le site) ; le panier n'a plus d'onglet « Lien », l'onglet Ami ouvre la composition avec les cartes dont l'ami a besoin.
+- Filtre « En stock chez le bot » : seulement les sets dont le bot a des cartes qui te manquent.
+- Amis : recherche (ami ou jeu) et tri. Souhaits : recherche, tri, et indication « dernière carte du set » / « un ami complète ton set ».
+- « Tout vérifier » lit maintenant toutes les cartes de la liste (manquantes, doublons, souhaits, alertes, cartes possédées) pour afficher leur coût en crédits ; prix d'achat affiché aussi en rupture.

@@ -76,7 +76,7 @@ app.post('/api/refresh', (_, res) => { // « Tout actualiser » : badges puis ca
 });
 // Boutons de scan : chacun lance une tâche indépendante dont la progression est dans /api/state (tasks)
 const scanFn = (k) => { const c = cfg(); return { badges: () => engine.scanBadges(c), cards: () => engine.scanCards(c), boosters: () => engine.scanBoosters(c), gems: () => engine.scanGems(c),
-  bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance(), verify: () => engine.scanVerify({ cfg: c }), prices: () => engine.scanPrices() }[k]; };
+  bot: () => engine.refreshBot(), friends: () => engine.scanFriends(c), balance: () => engine.scanBalance(), verify: () => engine.scanVerify({ cfg: c, all: true }), prices: () => engine.scanPrices() }[k]; };
 app.post('/api/scan/:task', (req, res) => {
   const k = req.params.task, fn = scanFn(k);
   if (!fn) return res.status(400).json({ error: 'Scan inconnu' });

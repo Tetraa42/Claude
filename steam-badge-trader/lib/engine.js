@@ -445,8 +445,13 @@ async function checkGameAll(appid, cfg, cpc, only) {
 const VERIFY_TTL = 6 * 3600e3, VERIFY_MAX = 60;
 // Jeux à vérifier : ceux où il manque des cartes ET où le bot a au moins une carte en stock (les moins chers d'abord).
 function verifyCandidates(all) {
-  return S.sets.filter((s) => !s.provisional && (all ? s.missingCount > 0 || s.dupes > 0 : s.missingCount > 0 && (sce.lookup(s.appid, s.name) || {}).stock > 0))
-    .sort((a, b) => (a.missingCount - b.missingCount) || ((a.cost || 0) - (b.cost || 0))).slice(0, all ? 100 : VERIFY_MAX);
+  if (!all) return S.sets.filter((s) => !s.provisional && s.missingCount > 0 && (sce.lookup(s.appid, s.name) || {}).stock > 0)
+    .sort((a, b) => (a.missingCount - b.missingCount) || ((a.cost || 0) - (b.cost || 0))).slice(0, VERIFY_MAX);
+  // « Tout vérifier » : toutes les cartes de la liste (manquantes, doublons, souhaits, alertes, et même les jeux où tu n'as qu'une carte) pour afficher leur coût en crédits
+  const watch = new Set([...S.wishlist.map((w) => w.appid), ...S.alerts.map((a) => a.appid)]);
+  const rank = (s) => (watch.has(s.appid) ? 0 : s.missingCount > 0 && s.missingCount <= 2 ? 1 : s.missingCount > 0 ? 2 : s.dupes > 0 ? 3 : 4);
+  return S.sets.filter((s) => !s.provisional && (s.missingCount > 0 || s.dupes > 0 || s.ownedUnique > 0 || watch.has(s.appid)))
+    .sort((a, b) => rank(a) - rank(b) || (a.missingCount - b.missingCount) || ((a.cost || 0) - (b.cost || 0))).slice(0, 300);
 }
 const friendsFresh = () => !!(S.friends.t && S.friends.all.size && Date.now() - S.friends.t < 2 * 3600e3);
 const verified = (appid) => sce.hasGame(appid) && sce.gameAge(appid) < VERIFY_TTL;
@@ -554,7 +559,8 @@ function wishState() {
     const friends = S.friends.list.filter((f) => (S.friends.inv.get(f.steamid) || new Map()).has(w.hash)).map((f) => ({ name: f.name, avatar: f.avatar, steamid: f.steamid }));
     const cur = set && set.cards.find((c) => c.hash === w.hash), price = cur && cur.price > 0 ? cur.price : null, priceHit = !!(w.target && price != null && price <= w.target);
     const worth = (sce.lookup(w.appid, w.game) || {}).worth || null;
-    return { ...w, worth, price, priceHit, owned: mine || 0, bot: bc ? { stock: bc.stock, price: bc.price } : null, botChecked: !!bc, friends, available: !!(bc && bc.stock > 0) || friends.length > 0 || priceHit, url: sce.gameUrl(w.appid) };
+    const miss = set ? set.cards.filter((c) => !c.owned && !c.unknown).map((c) => c.hash) : [], full = miss.length > 0 && S.friends.list.filter((f) => { const inv = S.friends.inv.get(f.steamid); return inv && miss.every((h) => inv.has(h)); }).map((f) => f.name);
+    return { ...w, setMissing: miss.length, lastCard: miss.length === 1 && miss[0] === w.hash, friendsFull: full, worth, price, priceHit, owned: mine || 0, bot: bc ? { stock: bc.stock, price: bc.price } : null, botChecked: !!bc, friends, available: !!(bc && bc.stock > 0) || friends.length > 0 || priceHit, url: sce.gameUrl(w.appid) };
   });
 }
 // Vérifie les cartes souhaitées (page du jeu chez le bot, au plus une fois par heure et par jeu)

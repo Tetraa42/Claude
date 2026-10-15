@@ -42,6 +42,7 @@
 
   <section id="v-wish" hidden>
     <div class="bar"><h2>Liste de souhaits <small>cartes surveillées chez le bot et chez tes amis</small></h2><div class="tools"><button id="wcheck" class="ghost">↻ Revérifier maintenant</button></div></div>
+    <div class="row" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:8px 0"><div class="search"><input id="wq" placeholder="🔎 Chercher une carte ou un jeu…"><button class="qx" data-clear="wq" hidden aria-label="Effacer">✕</button></div><select id="wsort" title="Trier"><option value="avail">Disponibles d'abord</option><option value="complete">Celles qui complètent un set d'abord</option><option value="game">Par jeu</option><option value="name">Nom A → Z</option><option value="price">Prix du marché (croissant)</option><option value="recent">Ajoutées récemment</option></select></div>
     <div id="wbody"></div>
   </section>
 
@@ -57,6 +58,7 @@
 
   <section id="v-friends" hidden>
     <div class="bar"><h2>Amis <small>qui a besoin des cartes que tu as en double ?</small></h2><div class="tools"><button id="fscan" class="ghost">↻ Lire les inventaires des amis</button><button id="fdiag" class="ghost">📋 Copier le diagnostic</button></div></div>
+    <div class="row ftool" style="justify-content:flex-start;gap:8px;flex-wrap:wrap;margin:8px 0"><div class="search"><input id="fq" placeholder="🔎 Chercher un ami ou un jeu…"><button class="qx" data-clear="fq" hidden aria-label="Effacer">✕</button></div><select id="fsort" title="Trier les amis"><option value="complete">Ceux que je peux aider à finir un badge</option><option value="give">Plus de cartes à leur donner</option><option value="need">Plus de cartes pour moi</option><option value="name">Nom A → Z</option><option value="nameD">Nom Z → A</option></select></div>
     <div id="fbody"></div>
   </section>
 
@@ -97,7 +99,7 @@
 
 <dialog id="dlg"><form method="dialog"><button class="x" aria-label="Fermer">✕</button></form>
   <h3 id="dt">Échange — panier</h3><p class="mut" id="dsub"></p>
-  <div class="tabs" id="tabs"><button data-s="bot">🤖 Bot (site)</button><button data-s="friend" class="on">👥 Ami</button><button data-s="url">🔗 Lien</button></div>
+  <div class="tabs" id="tabs"><button data-s="bot">🤖 Bot</button><button data-s="friend" class="on">👥 Ami</button></div>
   <div id="srcbox"></div>
   <div id="pv" class="pv" hidden><div><h4>Tu reçois <span id="askn"></span></h4><div id="askl" class="mini"></div></div><div class="arrow">⇄</div><div><h4>Tu donnes <span id="givn"></span></h4><div id="givel" class="mini"></div></div></div>
   <p id="note" class="note"></p>
